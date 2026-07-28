@@ -116,6 +116,84 @@ async def apply_cost_outbound(
     return avg * out_qty  # COGS
 
 
+async def _lock_balance(session, org_id, product_id, branch_id, godown_id, state="on_hand"):
+    await session.execute(
+        text(
+            "INSERT INTO stock_balance (org_id, product_id, branch_id, godown_id, location_state) "
+            "VALUES (:o,:p,:b,:g,:s) ON CONFLICT DO NOTHING"
+        ),
+        {"o": org_id, "p": product_id, "b": branch_id, "g": godown_id, "s": state},
+    )
+    return (
+        await session.execute(
+            text(
+                "SELECT on_hand, reserved FROM stock_balance WHERE org_id=:o AND product_id=:p "
+                "AND branch_id=:b AND godown_id=:g AND location_state=:s FOR UPDATE"
+            ),
+            {"o": org_id, "p": product_id, "b": branch_id, "g": godown_id, "s": state},
+        )
+    ).mappings().one()
+
+
+async def reserve_stock(
+    session: AsyncSession, *, org_id, branch_id, godown_id, product_id,
+    qty: Decimal, order_id, order_line_no, allow_negative=False, expires_at=None,
+) -> None:
+    """Hold stock for a sale order. `reserved` is its own source of truth
+    (stock_reservation) mirrored onto stock_balance.reserved in the same txn."""
+    bal = await _lock_balance(session, org_id, product_id, branch_id, godown_id)
+    available = Decimal(bal["on_hand"]) - Decimal(bal["reserved"])
+    if available < qty and not allow_negative:
+        raise OverSell(f"cannot reserve {qty}; only {available} available")
+    await session.execute(
+        text(
+            "INSERT INTO stock_reservation (org_id, branch_id, godown_id, product_id, qty, "
+            "source_order_id, source_order_line_no, expires_at) "
+            "VALUES (:o,:b,:g,:p,:q,:oid,:ln,:exp)"
+        ),
+        {"o": org_id, "b": branch_id, "g": godown_id, "p": product_id, "q": qty,
+         "oid": order_id, "ln": order_line_no, "exp": expires_at},
+    )
+    await session.execute(
+        text(
+            "UPDATE stock_balance SET reserved = reserved + :q, version=version+1, updated_at=now() "
+            "WHERE org_id=:o AND product_id=:p AND branch_id=:b AND godown_id=:g AND location_state='on_hand'"
+        ),
+        {"q": qty, "o": org_id, "p": product_id, "b": branch_id, "g": godown_id},
+    )
+
+
+async def release_reservations(
+    session: AsyncSession, *, org_id, order_id, order_line_no=None
+) -> Decimal:
+    """Release active reservations for an order (or one line), returning total released."""
+    clause = "AND source_order_line_no=:ln" if order_line_no is not None else ""
+    rows = (
+        await session.execute(
+            text(
+                f"SELECT id, product_id, branch_id, godown_id, qty FROM stock_reservation "
+                f"WHERE org_id=:o AND source_order_id=:oid AND status='active' {clause} FOR UPDATE"
+            ),
+            {"o": org_id, "oid": order_id, "ln": order_line_no},
+        )
+    ).mappings().all()
+    total = Decimal(0)
+    for r in rows:
+        await session.execute(
+            text("UPDATE stock_reservation SET status='released', released_at=now() WHERE id=:i"),
+            {"i": r["id"]},
+        )
+        await session.execute(
+            text(
+                "UPDATE stock_balance SET reserved = reserved - :q, version=version+1, updated_at=now() "
+                "WHERE org_id=:o AND product_id=:p AND branch_id=:b AND godown_id=:g AND location_state='on_hand'"
+            ),
+            {"q": r["qty"], "o": org_id, "p": r["product_id"], "b": r["branch_id"], "g": r["godown_id"]},
+        )
+        total += Decimal(r["qty"])
+    return total
+
+
 async def move_stock(
     session: AsyncSession,
     *,

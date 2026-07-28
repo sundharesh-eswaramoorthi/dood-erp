@@ -8,6 +8,7 @@ const NAV = [
   { to: "/products", label: "Products", end: false },
   { to: "/stock", label: "Stock", end: false },
   { to: "/purchase", label: "Purchase", end: false },
+  { to: "/sales", label: "Sales", end: false },
   { to: "/transfers", label: "Transfers", end: false },
   { to: "/units", label: "Units", end: false },
   { to: "/settings", label: "Settings", end: false },
