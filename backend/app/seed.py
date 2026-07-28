@@ -17,6 +17,8 @@ from app.services.numbering import current_fin_year
 PERMISSIONS = [
     ("party.read", "View parties"),
     ("party.create", "Create/edit parties"),
+    ("product.read", "View products & units"),
+    ("product.create", "Create/edit products"),
     ("stock.read", "View stock"),
     ("stock.write", "Adjust/transfer stock"),
     ("sales.create", "Create sale orders/bills"),
@@ -47,6 +49,9 @@ async def seed() -> None:
                     s, "INSERT INTO organization (name) VALUES (:n) RETURNING id",
                     n="Cholavin Traders",
                 )
+
+            # Scope the seed session so RLS-protected masters can be inserted.
+            await s.execute(text("SELECT set_config('app.org_id', :o, true)"), {"o": str(org_id)})
 
             branch_id = await _scalar(
                 s, "SELECT id FROM branch WHERE org_id=:o ORDER BY id LIMIT 1", o=org_id
@@ -123,6 +128,23 @@ async def seed() -> None:
                     ),
                     {"o": org_id, "fy": fy},
                 )
+
+            # base units of measure + a default product category
+            for code, name in [("BAG", "Bag"), ("KG", "Kilogram"), ("PCS", "Pieces"), ("BOX", "Box")]:
+                await s.execute(
+                    text(
+                        "INSERT INTO unit_of_measure (org_id, code, name) VALUES (:o, :c, :n) "
+                        "ON CONFLICT (org_id, code) DO NOTHING"
+                    ),
+                    {"o": org_id, "c": code, "n": name},
+                )
+            await s.execute(
+                text(
+                    "INSERT INTO product_category (org_id, name) VALUES (:o, 'General') "
+                    "ON CONFLICT (org_id, name) DO NOTHING"
+                ),
+                {"o": org_id},
+            )
 
         print(
             f"[seed] org={org_id} branch={branch_id} user='{settings.SEED_ADMIN_USERNAME}' "

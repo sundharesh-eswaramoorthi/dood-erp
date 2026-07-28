@@ -7,6 +7,8 @@ import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { LoginPage } from "./features/auth/LoginPage";
 import { PartiesPage } from "./features/parties/PartiesPage";
+import { ProductsPage } from "./features/products/ProductsPage";
+import { UnitsPage } from "./features/units/UnitsPage";
 import { theme } from "./theme";
 
 export default function App() {
@@ -25,6 +27,8 @@ export default function App() {
               }
             >
               <Route path="/" element={<PartiesPage />} />
+              <Route path="/products" element={<ProductsPage />} />
+              <Route path="/units" element={<UnitsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

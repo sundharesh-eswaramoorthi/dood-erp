@@ -1,7 +1,13 @@
-import { AppBar, Box, Button, Container, Toolbar, Typography } from "@mui/material";
-import { Outlet, useNavigate } from "react-router-dom";
+import { AppBar, Box, Button, Container, Stack, Toolbar, Typography } from "@mui/material";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../store/auth";
+
+const NAV = [
+  { to: "/", label: "Parties", end: true },
+  { to: "/products", label: "Products", end: false },
+  { to: "/units", label: "Units", end: false },
+];
 
 export function Layout() {
   const { user, logout } = useAuth();
@@ -11,9 +17,27 @@ export function Layout() {
     <Box sx={{ minHeight: "100vh", bgcolor: "background.default" }}>
       <AppBar position="static" color="primary" elevation={0}>
         <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1, fontWeight: 700 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, mr: 4 }}>
             CHOLAVIN&#8209;ERP
           </Typography>
+          <Stack direction="row" spacing={1} sx={{ flexGrow: 1 }}>
+            {NAV.map((n) => (
+              <Button
+                key={n.to}
+                color="inherit"
+                component={NavLink}
+                to={n.to}
+                end={n.end}
+                sx={{
+                  "&.active": { bgcolor: "rgba(255,255,255,0.16)" },
+                  textTransform: "none",
+                  fontWeight: 600,
+                }}
+              >
+                {n.label}
+              </Button>
+            ))}
+          </Stack>
           <Typography variant="body2" sx={{ mr: 2, opacity: 0.85 }}>
             {user?.username}
           </Typography>
