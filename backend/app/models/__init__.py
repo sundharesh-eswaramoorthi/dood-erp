@@ -1,5 +1,11 @@
 from app.models.base import Base
-from app.models.party import Party
+from app.models.party import (
+    Party,
+    PartyAddress,
+    PartyContact,
+    PartyDocument,
+    PartyGstRegistration,
+)
 from app.models.product import (
     Product,
     ProductCategory,
@@ -14,6 +20,10 @@ __all__ = [
     "Base",
     "AppUser",
     "Party",
+    "PartyAddress",
+    "PartyContact",
+    "PartyDocument",
+    "PartyGstRegistration",
     "Product",
     "ProductCategory",
     "ProductPacking",

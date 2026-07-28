@@ -5,6 +5,7 @@ import {
   Card,
   CardContent,
   Chip,
+  Link as MuiLink,
   MenuItem,
   Stack,
   Table,
@@ -17,6 +18,7 @@ import {
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 
 import { createParty, getActivity, listParties, type Party } from "./api";
 
@@ -145,7 +147,11 @@ export function PartiesPage() {
                     <TableCell>
                       <code>{p.party_code}</code>
                     </TableCell>
-                    <TableCell>{p.name}</TableCell>
+                    <TableCell>
+                      <MuiLink component={RouterLink} to={`/parties/${p.id}`} underline="hover">
+                        {p.name}
+                      </MuiLink>
+                    </TableCell>
                     <TableCell>
                       <Chip size="small" label={p.party_type} />
                     </TableCell>
