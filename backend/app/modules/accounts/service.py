@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Principal
 from app.models.party import Party
-from app.modules.accounts.schemas import AccountCreate, VoucherCreate
+from app.modules.accounts.schemas import (
+    AccountCreate,
+    ExpenseCategoryCreate,
+    ExpenseCreate,
+    VoucherCreate,
+)
 from app.services.account_ledger import post_account_entry
 from app.services.numbering import allocate
 from app.services.outbox import emit
@@ -97,6 +102,66 @@ async def list_vouchers(session: AsyncSession, principal: Principal, limit: int 
         await session.execute(
             text("SELECT id, doc_no, voucher_type, party_id, account_id, amount, voucher_date "
                  "FROM payment_voucher ORDER BY id DESC LIMIT :l"),
+            {"l": limit},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+# ---- expenses ----
+async def list_expense_categories(session: AsyncSession, principal: Principal) -> list[dict]:
+    rows = (await session.execute(text("SELECT id, name FROM expense_category WHERE is_active ORDER BY name"))).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def create_expense_category(session: AsyncSession, principal: Principal, data: ExpenseCategoryCreate) -> dict:
+    try:
+        row = (
+            await session.execute(
+                text("INSERT INTO expense_category (org_id, name) VALUES (:o,:n) RETURNING id, name"),
+                {"o": principal.org_id, "n": data.name},
+            )
+        ).mappings().one()
+    except IntegrityError as e:
+        raise ValueError(f"Category '{data.name}' already exists") from e
+    return dict(row)
+
+
+async def post_expense(session: AsyncSession, principal: Principal, data: ExpenseCreate) -> dict:
+    branch_id = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
+    if branch_id is None:
+        raise ValueError("Caller has no branch access")
+    if branch_id not in principal.branch_ids:
+        raise PermissionError("Branch not permitted")
+    acct = (await session.execute(text("SELECT id FROM cash_bank_account WHERE id=:a"), {"a": data.account_id})).scalar_one_or_none()
+    if acct is None:
+        raise ValueError("account not found")
+
+    edate = data.expense_date or dt.date.today()
+    number = await allocate(session, principal.org_id, None, "expense")
+    exp_id = (
+        await session.execute(
+            text("INSERT INTO expense (org_id, branch_id, account_id, category_id, doc_no, amount, expense_date, note, created_by) "
+                 "VALUES (:o,:b,:a,:c,:no,:amt,:ed,:nt,:by) RETURNING id"),
+            {"o": principal.org_id, "b": branch_id, "a": data.account_id, "c": data.category_id, "no": number,
+             "amt": data.amount, "ed": edate, "nt": data.note, "by": principal.user_id},
+        )
+    ).scalar_one()
+    # money leaves the account
+    acct_bal = await post_account_entry(
+        session, org_id=principal.org_id, account_id=data.account_id, direction="out",
+        amount=data.amount, source=("expense", exp_id, 0), effective_date=edate, created_by=principal.user_id,
+    )
+    await emit(session, principal.org_id, "expense", {"expense_id": exp_id, "amount": str(data.amount)})
+    return {"id": exp_id, "doc_no": number, "amount": data.amount, "account_id": data.account_id,
+            "category_id": data.category_id, "account_balance": acct_bal}
+
+
+async def list_expenses(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+    rows = (
+        await session.execute(
+            text("SELECT e.id, e.doc_no, e.amount, e.account_id, e.category_id, e.expense_date, e.note, c.name AS category "
+                 "FROM expense e LEFT JOIN expense_category c ON c.id=e.category_id ORDER BY e.id DESC LIMIT :l"),
             {"l": limit},
         )
     ).mappings().all()

@@ -19,7 +19,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { listParties } from "../parties/api";
-import { createAccount, listAccounts, listVouchers, postVoucher, type Account, type Voucher } from "./api";
+import {
+  createAccount,
+  listAccounts,
+  listExpenseCategories,
+  listExpenses,
+  listVouchers,
+  postExpense,
+  postVoucher,
+  type Account,
+  type Expense,
+  type Voucher,
+} from "./api";
 
 export function AccountsPage() {
   const qc = useQueryClient();
@@ -27,14 +38,20 @@ export function AccountsPage() {
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
   const vouchers = useQuery({ queryKey: ["vouchers"], queryFn: listVouchers });
 
+  const categories = useQuery({ queryKey: ["expense-categories"], queryFn: listExpenseCategories });
+  const expenses = useQuery({ queryKey: ["expenses"], queryFn: listExpenses });
+
   const [acc, setAcc] = useState({ name: "", account_type: "bank", opening: "0" });
   const [v, setV] = useState({ party: "", account: "", type: "receipt", amount: "", note: "" });
+  const [ex, setEx] = useState({ account: "", category: "", amount: "", note: "" });
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (parties.data?.length && !v.party) setV((s) => ({ ...s, party: String(parties.data![0].id) }));
     if (accounts.data?.length && !v.account) setV((s) => ({ ...s, account: String(accounts.data![0].id) }));
-  }, [parties.data, accounts.data, v.party, v.account]);
+    if (accounts.data?.length && !ex.account) setEx((s) => ({ ...s, account: String(accounts.data![0].id) }));
+    if (categories.data?.length && !ex.category) setEx((s) => ({ ...s, category: String(categories.data![0].id) }));
+  }, [parties.data, accounts.data, categories.data, v.party, v.account, ex.account, ex.category]);
 
   const partyName = (id: number) => parties.data?.find((p) => p.id === id)?.name ?? id;
   const accName = (id: number) => accounts.data?.find((a) => a.id === id)?.name ?? id;
@@ -59,6 +76,21 @@ export function AccountsPage() {
     onError: (e: unknown) => {
       const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setMsg(d || "Voucher failed");
+    },
+  });
+
+  const addExpense = useMutation({
+    mutationFn: () =>
+      postExpense({ account_id: Number(ex.account), amount: ex.amount, category_id: ex.category ? Number(ex.category) : null, note: ex.note }),
+    onSuccess: (r) => {
+      setMsg(`Expense ${r.doc_no}: account balance ₹${r.account_balance}.`);
+      setEx({ ...ex, amount: "", note: "" });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["expenses"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(d || "Expense failed");
     },
   });
 
@@ -119,6 +151,38 @@ export function AccountsPage() {
           <Typography variant="caption" color="text.secondary">
             Receipt = customer pays (party ledger credit + account in). Payment = we pay a supplier (party debit + account out). One transaction.
           </Typography>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Expenses
+          </Typography>
+          <Box component="form" onSubmit={(e) => { e.preventDefault(); if (ex.account && ex.amount) addExpense.mutate(); }}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+              <TextField label="Category" select value={ex.category} onChange={(e) => setEx({ ...ex, category: e.target.value })} sx={{ minWidth: 160 }}>
+                {(categories.data ?? []).map((c) => (<MenuItem key={c.id} value={String(c.id)}>{c.name}</MenuItem>))}
+              </TextField>
+              <TextField label="Paid from" select value={ex.account} onChange={(e) => setEx({ ...ex, account: e.target.value })} sx={{ minWidth: 160 }}>
+                {(accounts.data ?? []).map((a) => (<MenuItem key={a.id} value={String(a.id)}>{a.name}</MenuItem>))}
+              </TextField>
+              <TextField label="Amount" value={ex.amount} onChange={(e) => setEx({ ...ex, amount: e.target.value })} sx={{ width: 120 }} />
+              <TextField label="Note" value={ex.note} onChange={(e) => setEx({ ...ex, note: e.target.value })} />
+              <Button type="submit" variant="contained" color="secondary" disabled={addExpense.isPending}>Add expense</Button>
+            </Stack>
+          </Box>
+          <Stack spacing={0.5}>
+            {(expenses.data ?? []).slice(0, 8).map((e: Expense) => (
+              <Typography key={e.id} variant="body2">
+                <code>{e.doc_no}</code> · {e.category ?? "—"} · ₹{e.amount} · from {accName(e.account_id)}
+                {e.note ? ` · ${e.note}` : ""}
+              </Typography>
+            ))}
+            {(expenses.data ?? []).length === 0 && (
+              <Typography color="text.secondary" variant="body2">No expenses yet.</Typography>
+            )}
+          </Stack>
         </CardContent>
       </Card>
 

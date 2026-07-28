@@ -136,7 +136,8 @@ async def seed() -> None:
                                      ("purchase_bill", "PB-"), ("purchase_return", "PR-"),
                                      ("purchase_order", "PO-"), ("sale_order", "SO-"),
                                      ("delivery", "DLV-"), ("sales_bill", "SB-"),
-                                     ("sales_return", "SR-"), ("payment_voucher", "PV-")]:
+                                     ("sales_return", "SR-"), ("payment_voucher", "PV-"),
+                                     ("expense", "EXP-")]:
                 await s.execute(
                     text(
                         "INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
@@ -191,6 +192,13 @@ async def seed() -> None:
                         "ON CONFLICT (org_id, name) DO NOTHING"
                     ),
                     {"o": org_id, "n": aname, "t": atype},
+                )
+            # expense categories
+            for cname in ("Rent", "Salary", "Transport", "Utilities", "Misc"):
+                await s.execute(
+                    text("INSERT INTO expense_category (org_id, name) VALUES (:o, :n) "
+                         "ON CONFLICT (org_id, name) DO NOTHING"),
+                    {"o": org_id, "n": cname},
                 )
 
             # feature flags (Purchase Order toggle etc.)

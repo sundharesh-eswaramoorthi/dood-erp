@@ -40,3 +40,32 @@ class VoucherOut(BaseModel):
     amount: Decimal
     account_balance: Decimal
     party_net: Decimal
+
+
+class ExpenseCategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class ExpenseCategoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+
+
+class ExpenseCreate(BaseModel):
+    account_id: int
+    amount: Decimal = Field(gt=0)
+    category_id: int | None = None
+    branch_id: int | None = None
+    expense_date: dt.date | None = None
+    note: str | None = None
+
+
+class ExpenseOut(BaseModel):
+    id: int
+    doc_no: str | None
+    amount: Decimal
+    account_id: int
+    category_id: int | None
+    account_balance: Decimal

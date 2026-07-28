@@ -46,3 +46,38 @@ export async function listVouchers(): Promise<Voucher[]> {
   const { data } = await api.get<Voucher[]>("/api/v1/accounts/payment-vouchers");
   return data;
 }
+
+export interface ExpenseCategory {
+  id: number;
+  name: string;
+}
+
+export interface Expense {
+  id: number;
+  doc_no: string | null;
+  amount: string;
+  account_id: number;
+  category_id: number | null;
+  category?: string | null;
+  note?: string | null;
+}
+
+export async function listExpenseCategories(): Promise<ExpenseCategory[]> {
+  const { data } = await api.get<ExpenseCategory[]>("/api/v1/accounts/expense-categories");
+  return data;
+}
+
+export async function postExpense(payload: {
+  account_id: number;
+  amount: string;
+  category_id?: number | null;
+  note?: string;
+}): Promise<{ doc_no: string | null; account_balance: string }> {
+  const { data } = await api.post("/api/v1/accounts/expenses", payload);
+  return data as never;
+}
+
+export async function listExpenses(): Promise<Expense[]> {
+  const { data } = await api.get<Expense[]>("/api/v1/accounts/expenses");
+  return data;
+}
