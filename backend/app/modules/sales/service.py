@@ -12,14 +12,30 @@ from decimal import Decimal
 
 from app.core.deps import Principal
 from app.models.party import Party
-from app.modules.sales.schemas import DeliveryCreate, SaleOrderCreate
+from app.modules.sales.schemas import DeliveryCreate, SaleOrderCreate, SalesReturnCreate
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
 from app.services.outbox import emit
+from app.services.party_ledger import post_entry as post_party_entry
+
+Q2 = Decimal("0.01")
 
 
 class OverFulfil(Exception):
     """A delivery would move more than the sale order line ordered."""
+
+
+def _split_gst(taxable: Decimal, gst_rate: Decimal, supply_type: str):
+    tax = (taxable * gst_rate / 100).quantize(Q2)
+    if supply_type == "inter":
+        return Decimal(0), Decimal(0), tax, tax
+    cgst = (tax / 2).quantize(Q2)
+    return cgst, (tax - cgst).quantize(Q2), Decimal(0), tax
+
+
+async def _product_gst(session, product_id) -> Decimal:
+    v = (await session.execute(text("SELECT gst_rate FROM product WHERE id=:p"), {"p": product_id})).scalar_one_or_none()
+    return Decimal(v) if v is not None else Decimal(0)
 
 
 async def get_order(session: AsyncSession, order_id: int) -> dict:
@@ -288,3 +304,180 @@ async def list_deliveries(session: AsyncSession, principal: Principal, limit: in
         )
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+# ---- sales bill (the other half of exactly-once) ----
+async def get_bill(session: AsyncSession, bill_id: int) -> dict:
+    hdr = (await session.execute(text("SELECT * FROM sales_bill WHERE id=:i"), {"i": bill_id})).mappings().one()
+    lines = (
+        await session.execute(
+            text("SELECT line_no, product_id, base_qty, moved_qty, taxable, cgst, sgst, igst, cogs_amount, line_total "
+                 "FROM sales_bill_line WHERE bill_id=:i ORDER BY line_no"),
+            {"i": bill_id},
+        )
+    ).mappings().all()
+    return {"id": hdr["id"], "doc_no": hdr["doc_no"], "status": hdr["status"], "customer_id": hdr["customer_id"],
+            "taxable_total": hdr["taxable_total"], "tax_total": hdr["tax_total"],
+            "cogs_total": hdr["cogs_total"], "grand_total": hdr["grand_total"],
+            "lines": [dict(r) for r in lines]}
+
+
+async def bill_order(session: AsyncSession, principal: Principal, order_id: int, supply_type: str = "intra") -> dict:
+    order = (await session.execute(text("SELECT * FROM sale_order WHERE id=:i"), {"i": order_id})).mappings().one_or_none()
+    if order is None:
+        raise LookupError("Order not found")
+    if order["status"] == "cancelled":
+        raise ValueError("Order is cancelled")
+    branch = order["branch_id"]
+    number = await allocate(session, principal.org_id, None, "sales_bill")
+    bill_id = (
+        await session.execute(
+            text("INSERT INTO sales_bill (org_id, branch_id, customer_id, sale_order_id, doc_no, supply_type, "
+                 "bill_date, created_by) VALUES (:o,:b,:c,:so,:no,:st,:bd,:by) RETURNING id"),
+            {"o": principal.org_id, "b": branch, "c": order["customer_id"], "so": order_id, "no": number,
+             "st": supply_type, "bd": dt.date.today(), "by": principal.user_id},
+        )
+    ).scalar_one()
+
+    lines = (
+        await session.execute(
+            text("SELECT line_no, product_id, godown_id, base_qty, rate FROM sale_order_line WHERE order_id=:i ORDER BY line_no"),
+            {"i": order_id},
+        )
+    ).mappings().all()
+    taxable_total = tax_total = cogs_total = grand_total = Decimal(0)
+    out = []
+    for l in lines:
+        ordered = Decimal(l["base_qty"])
+        fulfilled = await _fulfilled(session, principal.org_id, order_id, l["line_no"])
+        to_move = ordered - fulfilled  # the bill moves ONLY what a delivery hasn't
+        moved = Decimal(0)
+        if to_move > 0:
+            cost = await eng.current_wac(session, principal.org_id, l["product_id"], branch)
+            allow_neg = await eng.product_allows_negative(session, l["product_id"])
+            await eng.move_stock(
+                session, org_id=principal.org_id, branch_id=branch, godown_id=l["godown_id"],
+                product_id=l["product_id"], signed_qty=-to_move, movement_type="sale", cost=cost,
+                source=("sales_bill", bill_id, l["line_no"]), effective_date=dt.date.today(),
+                created_by=principal.user_id, allow_negative=allow_neg,
+            )
+            await eng.apply_cost_outbound(session, principal.org_id, l["product_id"], branch, to_move)
+            await eng.consume_reservation(session, org_id=principal.org_id, order_id=order_id,
+                                          order_line_no=l["line_no"], qty=to_move)
+            await session.execute(
+                text("INSERT INTO stock_fulfillment (org_id, branch_id, sale_order_id, sale_order_line_no, "
+                     "moved_qty, moved_by_doc_type, moved_by_doc_id, godown_id) "
+                     "VALUES (:o,:b,:so,:ln,:q,'sales_bill',:bid,:g)"),
+                {"o": principal.org_id, "b": branch, "so": order_id, "ln": l["line_no"],
+                 "q": to_move, "bid": bill_id, "g": l["godown_id"]},
+            )
+            moved = to_move
+
+        cogs_unit = await eng.current_wac(session, principal.org_id, l["product_id"], branch)
+        cogs = (cogs_unit * ordered).quantize(Q2)
+        rate = Decimal(l["rate"])
+        taxable = (ordered * rate).quantize(Q2)
+        gst_rate = await _product_gst(session, l["product_id"])
+        cgst, sgst, igst, tax = _split_gst(taxable, gst_rate, supply_type)
+        line_total = (taxable + tax).quantize(Q2)
+        await session.execute(
+            text("INSERT INTO sales_bill_line (org_id, bill_id, line_no, product_id, base_qty, moved_qty, rate, "
+                 "taxable, gst_rate, cgst, sgst, igst, cogs_amount, line_total) "
+                 "VALUES (:o,:bid,:ln,:p,:bq,:mv,:rt,:tx,:gr,:cg,:sg,:ig,:cogs,:lt)"),
+            {"o": principal.org_id, "bid": bill_id, "ln": l["line_no"], "p": l["product_id"], "bq": ordered,
+             "mv": moved, "rt": rate, "tx": taxable, "gr": gst_rate, "cg": cgst, "sg": sgst, "ig": igst,
+             "cogs": cogs, "lt": line_total},
+        )
+        taxable_total += taxable
+        tax_total += tax
+        cogs_total += cogs
+        grand_total += line_total
+        out.append({"line_no": l["line_no"], "product_id": l["product_id"], "base_qty": ordered, "moved_qty": moved,
+                    "taxable": taxable, "cgst": cgst, "sgst": sgst, "igst": igst, "cogs_amount": cogs, "line_total": line_total})
+
+    await session.execute(
+        text("UPDATE sales_bill SET taxable_total=:t, tax_total=:x, cogs_total=:c, grand_total=:g WHERE id=:i"),
+        {"t": taxable_total, "x": tax_total, "c": cogs_total, "g": grand_total, "i": bill_id},
+    )
+    await post_party_entry(session, org_id=principal.org_id, branch_id=branch, party_id=order["customer_id"],
+                           entry_side="debit", amount=grand_total, source=("sales_bill", bill_id, 0),
+                           effective_date=dt.date.today(), created_by=principal.user_id)
+    # order fully fulfilled now?
+    undelivered = (
+        await session.execute(
+            text("SELECT COUNT(*) FROM sale_order_line sol WHERE order_id=:so AND base_qty > "
+                 "(SELECT COALESCE(SUM(moved_qty),0) FROM stock_fulfillment f "
+                 " WHERE f.sale_order_id=sol.order_id AND f.sale_order_line_no=sol.line_no)"),
+            {"so": order_id},
+        )
+    ).scalar_one()
+    if undelivered == 0 and order["status"] == "pending":
+        await session.execute(text("UPDATE sale_order SET status='delivered' WHERE id=:i"), {"i": order_id})
+    await emit(session, principal.org_id, "sale.bill", {"bill_id": bill_id, "order_id": order_id, "grand_total": str(grand_total)})
+    return await get_bill(session, bill_id)
+
+
+async def list_bills(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+    rows = (
+        await session.execute(
+            text("SELECT id, doc_no, customer_id, sale_order_id, grand_total, status FROM sales_bill ORDER BY id DESC LIMIT :l"),
+            {"l": limit},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def post_sales_return(session: AsyncSession, principal: Principal, data: SalesReturnCreate) -> dict:
+    branch = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
+    if branch is None:
+        raise ValueError("Caller has no branch access")
+    if branch not in principal.branch_ids:
+        raise PermissionError("Branch not permitted")
+    customer = (await session.execute(select(Party).where(Party.id == data.customer_id))).scalar_one_or_none()
+    if customer is None:
+        raise ValueError("customer not found")
+
+    number = await allocate(session, principal.org_id, None, "sales_return")
+    ret_id = (
+        await session.execute(
+            text("INSERT INTO sales_return (org_id, branch_id, customer_id, godown_id, doc_no, orig_bill_id, "
+                 "supply_type, return_date, created_by) VALUES (:o,:b,:c,:g,:no,:ob,:st,:rd,:by) RETURNING id"),
+            {"o": principal.org_id, "b": branch, "c": data.customer_id, "g": data.godown_id, "no": number,
+             "ob": data.orig_bill_id, "st": data.supply_type, "rd": dt.date.today(), "by": principal.user_id},
+        )
+    ).scalar_one()
+    taxable_total = tax_total = grand_total = Decimal(0)
+    for i, line in enumerate(data.lines, start=1):
+        base = await eng.to_base(session, line.product_id, line.entered_qty, line.entered_unit_id)
+        taxable = (Decimal(line.entered_qty) * Decimal(line.rate)).quantize(Q2)
+        gst_rate = Decimal(line.gst_rate) if line.gst_rate is not None else await _product_gst(session, line.product_id)
+        cgst, sgst, igst, tax = _split_gst(taxable, gst_rate, data.supply_type)
+        line_total = (taxable + tax).quantize(Q2)
+        cost = await eng.current_wac(session, principal.org_id, line.product_id, branch)
+        # goods come BACK in
+        await eng.move_stock(session, org_id=principal.org_id, branch_id=branch, godown_id=data.godown_id,
+                             product_id=line.product_id, signed_qty=base, movement_type="return_in", cost=cost,
+                             source=("sales_return", ret_id, i), effective_date=dt.date.today(), created_by=principal.user_id)
+        await eng.apply_cost_inbound(session, principal.org_id, line.product_id, branch, base, cost)
+        await session.execute(
+            text("INSERT INTO sales_return_line (org_id, return_id, line_no, product_id, entered_qty, entered_unit_id, "
+                 "base_qty, rate, taxable, gst_rate, cgst, sgst, igst, line_total) "
+                 "VALUES (:o,:r,:ln,:p,:eq,:eu,:bq,:rt,:tx,:gr,:cg,:sg,:ig,:lt)"),
+            {"o": principal.org_id, "r": ret_id, "ln": i, "p": line.product_id, "eq": line.entered_qty,
+             "eu": line.entered_unit_id, "bq": base, "rt": line.rate, "tx": taxable, "gr": gst_rate,
+             "cg": cgst, "sg": sgst, "ig": igst, "lt": line_total},
+        )
+        taxable_total += taxable
+        tax_total += tax
+        grand_total += line_total
+    await session.execute(
+        text("UPDATE sales_return SET taxable_total=:t, tax_total=:x, grand_total=:g WHERE id=:i"),
+        {"t": taxable_total, "x": tax_total, "g": grand_total, "i": ret_id},
+    )
+    # reduce customer receivable: CREDIT
+    await post_party_entry(session, org_id=principal.org_id, branch_id=branch, party_id=data.customer_id,
+                           entry_side="credit", amount=grand_total, source=("sales_return", ret_id, 0),
+                           effective_date=dt.date.today(), created_by=principal.user_id)
+    await emit(session, principal.org_id, "sale.return", {"return_id": ret_id, "customer_id": data.customer_id})
+    return {"id": ret_id, "doc_no": number, "status": "posted", "customer_id": data.customer_id,
+            "taxable_total": taxable_total, "tax_total": tax_total, "grand_total": grand_total}

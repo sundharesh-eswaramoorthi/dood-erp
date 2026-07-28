@@ -6,10 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import Principal, get_scoped_session, require_permission
 from app.modules.sales import service
 from app.modules.sales.schemas import (
+    BillOrderIn,
     DeliveryCreate,
     DeliveryOut,
     SaleOrderCreate,
     SaleOrderOut,
+    SalesBillOut,
+    SalesReturnCreate,
+    SalesReturnOut,
 )
 from app.services.stock_engine import OverSell
 
@@ -125,3 +129,46 @@ async def list_deliveries(
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_deliveries(session, principal)
+
+
+# ---- sales bills & returns ----
+@router.post("/orders/{order_id}/bill", response_model=SalesBillOut, status_code=201)
+async def bill_order(
+    order_id: int,
+    payload: BillOrderIn | None = None,
+    principal: Principal = Depends(require_permission("sales.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    supply = (payload.supply_type if payload else "intra")
+    try:
+        return await service.bill_order(session, principal, order_id, supply)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+    except OverSell as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.get("/bills")
+async def list_bills(
+    principal: Principal = Depends(require_permission("sales.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_bills(session, principal)
+
+
+@router.post("/returns", response_model=SalesReturnOut, status_code=201)
+async def create_return(
+    payload: SalesReturnCreate,
+    principal: Principal = Depends(require_permission("sales.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.post_sales_return(session, principal, payload)
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+    except OverSell as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

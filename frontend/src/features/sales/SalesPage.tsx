@@ -21,7 +21,16 @@ import { useEffect, useState } from "react";
 import { listParties } from "../parties/api";
 import { listProducts } from "../products/api";
 import { getCurrentStock, listGodowns } from "../stock/api";
-import { cancelOrder, createOrder, deliverOrder, listOrders, type SaleOrder } from "./api";
+import {
+  billOrder,
+  cancelOrder,
+  createOrder,
+  deliverOrder,
+  listBills,
+  listOrders,
+  type SaleOrder,
+  type SalesBill,
+} from "./api";
 
 const EMPTY = { customer: "", godown: "", product: "", qty: "", rate: "" };
 const STATUS_COLOR: Record<string, "warning" | "success" | "default"> = {
@@ -36,6 +45,7 @@ export function SalesPage() {
   const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const orders = useQuery({ queryKey: ["sale-orders"], queryFn: listOrders });
+  const bills = useQuery({ queryKey: ["sales-bills"], queryFn: listBills });
 
   const [f, setF] = useState(EMPTY);
   const [msg, setMsg] = useState<string | null>(null);
@@ -95,6 +105,19 @@ export function SalesPage() {
     onError: (e: unknown) => {
       const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       setMsg(d || "Delivery failed");
+    },
+  });
+
+  const bill = useMutation({
+    mutationFn: (id: number) => billOrder(id),
+    onSuccess: (b) => {
+      setMsg(`Billed ${b.doc_no}: ₹${b.grand_total} to receivable (COGS ₹${b.cogs_total}). Delivered goods → no extra stock movement.`);
+      qc.invalidateQueries({ queryKey: ["sales-bills"] });
+      qc.invalidateQueries({ queryKey: ["stock-current"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(d || "Billing failed");
     },
   });
 
@@ -174,6 +197,11 @@ export function SalesPage() {
                         </Button>
                       </>
                     )}
+                    {o.status === "delivered" && (
+                      <Button size="small" onClick={() => bill.mutate(o.id)} disabled={bill.isPending}>
+                        Bill
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}
@@ -181,6 +209,41 @@ export function SalesPage() {
                 <TableRow>
                   <TableCell colSpan={4}>
                     <Typography color="text.secondary">No orders yet.</Typography>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Sales bills
+          </Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Doc</TableCell>
+                <TableCell>Customer</TableCell>
+                <TableCell>Order</TableCell>
+                <TableCell align="right">Grand total</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(bills.data ?? []).map((b: SalesBill) => (
+                <TableRow key={b.id}>
+                  <TableCell><code>{b.doc_no}</code></TableCell>
+                  <TableCell>{partyName(b.customer_id)}</TableCell>
+                  <TableCell>{b.sale_order_id ? `#${b.sale_order_id}` : "—"}</TableCell>
+                  <TableCell align="right">₹{b.grand_total}</TableCell>
+                </TableRow>
+              ))}
+              {(bills.data ?? []).length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4}>
+                    <Typography color="text.secondary">No bills yet.</Typography>
                   </TableCell>
                 </TableRow>
               )}

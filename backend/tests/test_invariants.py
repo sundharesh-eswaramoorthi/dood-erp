@@ -185,6 +185,86 @@ async def test_exactly_once_delivery(ctx):
     assert reserved == await _active_reserved(s, org, product, branch, godown)
 
 
+async def _party_net(s, org, party):
+    return Decimal((await s.execute(text(
+        "SELECT COALESCE(net_balance,0) FROM party_balance WHERE org_id=:o AND party_id=:p"),
+        {"o": org, "p": party})).scalar_one_or_none() or 0)
+
+
+async def _sale_moved(s, org, product):
+    return Decimal((await s.execute(text(
+        "SELECT COALESCE(-SUM(signed_qty),0) FROM stock_movement_ledger "
+        "WHERE org_id=:o AND product_id=:p AND movement_type='sale'"), {"o": org, "p": product})).scalar_one())
+
+
+async def _prep(ctx, qty=100):
+    s, org, branch, godown, product = ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"]
+    await eng.move_stock(s, org_id=org, branch_id=branch, godown_id=godown, product_id=product,
+                         signed_qty=Decimal(qty), movement_type="purchase", cost=Decimal(10),
+                         source=("seed", next(_ids), 1), effective_date=TODAY, created_by=1)
+    await eng.apply_cost_inbound(s, org, product, branch, Decimal(qty), Decimal(10))
+    await s.commit()
+
+
+async def test_bill_after_delivery_moves_no_stock(ctx):
+    """Exactly-once (delivery half): once a delivery moved the goods, the bill
+    posts NO stock — only the receivable + COGS. Goods move exactly once total."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import OrderLineIn, SaleOrderCreate
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx)
+
+    order = await sales.create_order(s, prin, SaleOrderCreate(
+        customer_id=party, lines=[OrderLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(20), entered_unit_id=unit, rate=Decimal(50))]))
+    await s.commit()
+    await sales.deliver_full(s, prin, order["id"])
+    await s.commit()
+    on_hand_after_delivery, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand_after_delivery == Decimal(80)  # 100 - 20
+
+    binfo = await sales.bill_order(s, prin, order["id"], "intra")
+    await s.commit()
+    on_hand_after_bill, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand_after_bill == Decimal(80), "bill must NOT move already-delivered stock"
+    assert all(l["moved_qty"] == 0 for l in binfo["lines"])
+    # receivable posted; taxable 20*50=1000 +5%? product gst not set -> 0. grand = 1000
+    assert await _party_net(s, org, party) == Decimal(binfo["grand_total"])
+    # goods moved exactly once: total sale ledger == fulfilment == 20
+    assert await _sale_moved(s, org, product) == Decimal(20)
+    assert on_hand_after_bill == await _ledger_sum(s, org, product, branch, godown)
+    assert reserved == await _active_reserved(s, org, product, branch, godown)
+
+
+async def test_bill_without_delivery_is_the_mover(ctx):
+    """Exactly-once (bill half): with no delivery, the bill IS the mover
+    (counter-sale) — it moves the stock and records fulfilment."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import OrderLineIn, SaleOrderCreate
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx)
+
+    order = await sales.create_order(s, prin, SaleOrderCreate(
+        customer_id=party, lines=[OrderLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(15), entered_unit_id=unit, rate=Decimal(50))]))
+    await s.commit()
+    binfo = await sales.bill_order(s, prin, order["id"], "intra")  # no delivery -> bill moves it
+    await s.commit()
+    on_hand, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == Decimal(85), "bill must move stock when nothing delivered it"
+    assert binfo["lines"][0]["moved_qty"] == Decimal(15)
+    assert await _sale_moved(s, org, product) == Decimal(15)  # moved exactly once
+    assert reserved == Decimal(0)  # reservation consumed by the bill
+    assert on_hand == await _ledger_sum(s, org, product, branch, godown)
+    assert reserved == await _active_reserved(s, org, product, branch, godown)
+
+
 async def test_ledger_is_append_only(ctx):
     s, org, branch, godown, product = ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"]
     await eng.move_stock(s, org_id=org, branch_id=branch, godown_id=godown, product_id=product,
