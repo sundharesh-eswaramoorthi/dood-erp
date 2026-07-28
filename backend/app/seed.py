@@ -146,6 +146,36 @@ async def seed() -> None:
                 {"o": org_id},
             )
 
+            # GST tax-rate master
+            for name, rate in [("GST 0%", 0), ("GST 5%", 5), ("GST 12%", 12), ("GST 18%", 18), ("GST 28%", 28)]:
+                await s.execute(
+                    text(
+                        "INSERT INTO tax_rate (org_id, name, rate) VALUES (:o, :n, :r) "
+                        "ON CONFLICT (org_id, name) DO NOTHING"
+                    ),
+                    {"o": org_id, "n": name, "r": rate},
+                )
+
+            # a few starter tags
+            for name, color in [("Wholesale", "#1E3A5F"), ("Retail", "#2E7D5B"), ("Priority", "#B96D28")]:
+                await s.execute(
+                    text(
+                        "INSERT INTO tag_definition (org_id, name, color) VALUES (:o, :n, :c) "
+                        "ON CONFLICT (org_id, name) DO NOTHING"
+                    ),
+                    {"o": org_id, "n": name, "c": color},
+                )
+
+            # feature flags (Purchase Order toggle etc.)
+            for key, val in [("feature.purchase_order", '{"enabled": true}'), ("feature.sale_order", '{"enabled": true}')]:
+                await s.execute(
+                    text(
+                        "INSERT INTO system_setting (org_id, key, value) VALUES (:o, :k, CAST(:v AS jsonb)) "
+                        "ON CONFLICT (org_id, key) DO NOTHING"
+                    ),
+                    {"o": org_id, "k": key, "v": val},
+                )
+
         print(
             f"[seed] org={org_id} branch={branch_id} user='{settings.SEED_ADMIN_USERNAME}' "
             f"password='{settings.SEED_ADMIN_PASSWORD}' ready."

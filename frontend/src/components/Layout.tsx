@@ -7,6 +7,7 @@ const NAV = [
   { to: "/", label: "Parties", end: true },
   { to: "/products", label: "Products", end: false },
   { to: "/units", label: "Units", end: false },
+  { to: "/settings", label: "Settings", end: false },
 ];
 
 export function Layout() {

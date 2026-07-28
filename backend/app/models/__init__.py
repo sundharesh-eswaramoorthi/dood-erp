@@ -7,6 +7,7 @@ from app.models.product import (
     UnitConversion,
     UnitOfMeasure,
 )
+from app.models.settings import SystemSetting, TagAssignment, TagDefinition, TaxRate
 from app.models.user import AppUser
 
 __all__ = [
@@ -18,4 +19,8 @@ __all__ = [
     "ProductPacking",
     "UnitConversion",
     "UnitOfMeasure",
+    "TaxRate",
+    "TagDefinition",
+    "TagAssignment",
+    "SystemSetting",
 ]
