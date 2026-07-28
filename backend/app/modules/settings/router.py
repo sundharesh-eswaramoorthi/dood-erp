@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Principal, get_principal, get_scoped_session, require_permission
 from app.modules.settings.schemas import (
+    BranchOut,
+    GodownOut,
     SettingOut,
     SettingUpsert,
     TagCreate,
@@ -15,6 +17,23 @@ from app.modules.settings.schemas import (
 from app.modules.settings import service
 
 router = APIRouter()
+
+
+# ---- branches & godowns ----
+@router.get("/branches", response_model=list[BranchOut])
+async def branches_list(
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_branches(session, principal)
+
+
+@router.get("/godowns", response_model=list[GodownOut])
+async def godowns_list(
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_godowns(session, principal)
 
 
 # ---- tax rates ----

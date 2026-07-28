@@ -128,6 +128,17 @@ async def seed() -> None:
                     ),
                     {"o": org_id, "fy": fy},
                 )
+            # org-wide numbering series for stock documents
+            for doc_type, prefix in [("stock_adjustment", "ADJ-"), ("stock_transfer", "TRF-"),
+                                     ("stock_verification", "VER-")]:
+                await s.execute(
+                    text(
+                        "INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
+                        "VALUES (:o, NULL, :dt, :fy, :px, 4) "
+                        "ON CONFLICT (org_id, COALESCE(branch_id, 0), doc_type, fin_year) DO NOTHING"
+                    ),
+                    {"o": org_id, "dt": doc_type, "fy": fy, "px": prefix},
+                )
 
             # base units of measure + a default product category
             for code, name in [("BAG", "Bag"), ("KG", "Kilogram"), ("PCS", "Pieces"), ("BOX", "Box")]:

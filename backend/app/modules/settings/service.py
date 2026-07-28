@@ -11,6 +11,30 @@ from app.models.settings import SystemSetting, TagDefinition, TaxRate
 from app.modules.settings.schemas import TagCreate, TaxRateCreate
 
 
+# ---- branches & godowns (org masters; filtered explicitly) ----
+async def list_branches(session: AsyncSession, principal: Principal) -> list[dict]:
+    rows = (
+        await session.execute(
+            text("SELECT id, name FROM branch WHERE org_id = :o AND is_active ORDER BY name"),
+            {"o": principal.org_id},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def list_godowns(session: AsyncSession, principal: Principal) -> list[dict]:
+    rows = (
+        await session.execute(
+            text(
+                "SELECT id, name, branch_id FROM godown "
+                "WHERE org_id = :o AND is_active AND branch_id = ANY(:b) ORDER BY name"
+            ),
+            {"o": principal.org_id, "b": principal.branch_ids or [-1]},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 # ---- tax rates ----
 async def list_tax_rates(session: AsyncSession, principal: Principal) -> list[TaxRate]:
     return list((await session.execute(select(TaxRate).order_by(TaxRate.rate))).scalars().all())

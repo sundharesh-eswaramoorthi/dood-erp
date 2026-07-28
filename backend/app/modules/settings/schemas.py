@@ -33,6 +33,17 @@ class TagOut(BaseModel):
     is_active: bool
 
 
+class BranchOut(BaseModel):
+    id: int
+    name: str
+
+
+class GodownOut(BaseModel):
+    id: int
+    name: str
+    branch_id: int
+
+
 class SettingUpsert(BaseModel):
     value: dict
 

@@ -6,6 +6,7 @@ import { useAuth } from "../store/auth";
 const NAV = [
   { to: "/", label: "Parties", end: true },
   { to: "/products", label: "Products", end: false },
+  { to: "/stock", label: "Stock", end: false },
   { to: "/units", label: "Units", end: false },
   { to: "/settings", label: "Settings", end: false },
 ];

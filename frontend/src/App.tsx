@@ -10,6 +10,7 @@ import { PartiesPage } from "./features/parties/PartiesPage";
 import { PartyDetailPage } from "./features/parties/PartyDetailPage";
 import { ProductsPage } from "./features/products/ProductsPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
+import { StockPage } from "./features/stock/StockPage";
 import { UnitsPage } from "./features/units/UnitsPage";
 import { theme } from "./theme";
 
@@ -31,6 +32,7 @@ export default function App() {
               <Route path="/" element={<PartiesPage />} />
               <Route path="/parties/:id" element={<PartyDetailPage />} />
               <Route path="/products" element={<ProductsPage />} />
+              <Route path="/stock" element={<StockPage />} />
               <Route path="/units" element={<UnitsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
