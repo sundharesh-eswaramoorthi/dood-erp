@@ -63,6 +63,19 @@ curl -s http://localhost:8000/api/v1/parties  -H "Authorization: Bearer $TOKEN"
 curl -s http://localhost:8000/api/v1/activity -H "Authorization: Bearer $TOKEN"
 ```
 
+## Tests
+
+Property/invariant tests run against a throwaway `cholavin_test` database
+(created + migrated + dropped automatically), driving random operation
+sequences through the real engine and asserting the ledger invariants
+(`on_hand == SUM(ledger)`, `reserved == SUM(active reservations)`,
+`party net == SUM(debit) - SUM(credit)`), plus the oversell guard and the
+append-only trigger.
+
+```bash
+docker compose exec backend pytest -q
+```
+
 ## Layout
 
 ```

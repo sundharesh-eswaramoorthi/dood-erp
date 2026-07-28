@@ -1,3 +1,4 @@
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -15,7 +16,8 @@ target_metadata = Base.metadata
 
 
 def run_migrations_online() -> None:
-    connectable = create_engine(settings.migration_database_url, poolclass=pool.NullPool)
+    url = os.environ.get("ALEMBIC_URL") or settings.migration_database_url
+    connectable = create_engine(url, poolclass=pool.NullPool)
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
         with context.begin_transaction():
