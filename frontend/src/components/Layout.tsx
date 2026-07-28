@@ -4,7 +4,8 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../store/auth";
 
 const NAV = [
-  { to: "/", label: "Parties", end: true },
+  { to: "/", label: "Dashboard", end: true },
+  { to: "/parties", label: "Parties", end: false },
   { to: "/products", label: "Products", end: false },
   { to: "/stock", label: "Stock", end: false },
   { to: "/purchase", label: "Purchase", end: false },

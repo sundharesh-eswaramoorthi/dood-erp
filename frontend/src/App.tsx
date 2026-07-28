@@ -6,6 +6,7 @@ import { queryClient } from "./app/queryClient";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { AccountsPage } from "./features/accounts/AccountsPage";
+import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { LoginPage } from "./features/auth/LoginPage";
 import { PartiesPage } from "./features/parties/PartiesPage";
 import { PartyDetailPage } from "./features/parties/PartyDetailPage";
@@ -33,7 +34,8 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route path="/" element={<PartiesPage />} />
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/parties" element={<PartiesPage />} />
               <Route path="/parties/:id" element={<PartyDetailPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/stock" element={<StockPage />} />
