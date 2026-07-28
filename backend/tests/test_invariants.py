@@ -122,6 +122,69 @@ async def test_oversell_guard_blocks(ctx):
     await s.rollback()
 
 
+async def test_exactly_once_delivery(ctx):
+    """T4: order -> partial deliveries -> goods move EXACTLY once; a delivery can
+    never fulfil more than ordered (the single-mover / exactly-once guarantee)."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import (
+        DeliveryCreate, DeliveryLineIn, OrderLineIn, SaleOrderCreate,
+    )
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"]
+    )
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+
+    # stock in 100
+    await eng.move_stock(s, org_id=org, branch_id=branch, godown_id=godown, product_id=product,
+                         signed_qty=Decimal(100), movement_type="purchase", cost=Decimal(10),
+                         source=("seed", next(_ids), 1), effective_date=TODAY, created_by=1)
+    await eng.apply_cost_inbound(s, org, product, branch, Decimal(100), Decimal(10))
+    await s.commit()
+
+    # order 10 (reserves 10)
+    order = await sales.create_order(s, prin, SaleOrderCreate(
+        customer_id=party,
+        lines=[OrderLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(10), entered_unit_id=unit, rate=Decimal(50))],
+    ))
+    await s.commit()
+    oid = order["id"]
+    on_hand, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert (on_hand, reserved) == (Decimal(100), Decimal(10))
+
+    # two draft deliveries of 6 each (12 total > 10 ordered)
+    d1 = await sales.create_delivery(s, prin, DeliveryCreate(sale_order_id=oid, lines=[DeliveryLineIn(sale_order_line_no=1, qty=Decimal(6))]))
+    d2 = await sales.create_delivery(s, prin, DeliveryCreate(sale_order_id=oid, lines=[DeliveryLineIn(sale_order_line_no=1, qty=Decimal(6))]))
+    await s.commit()
+
+    # dispatch the first -> moves 6 exactly once, consumes 6 of the reservation
+    await sales.dispatch_delivery(s, prin, d1["id"])
+    await s.commit()
+    on_hand, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == Decimal(94)   # 100 - 6
+    assert reserved == Decimal(4)   # 10 - 6
+
+    # dispatching the second (6) would make fulfilment 12 > 10 -> blocked
+    with pytest.raises(sales.OverFulfil):
+        await sales.dispatch_delivery(s, prin, d2["id"])
+    await s.rollback()
+
+    # nothing double-moved: total sale movements == total fulfilment == 6
+    moved_out = Decimal((await s.execute(text(
+        "SELECT COALESCE(-SUM(signed_qty),0) FROM stock_movement_ledger "
+        "WHERE org_id=:o AND product_id=:p AND movement_type='sale'"), {"o": org, "p": product})).scalar_one())
+    fulfilled = Decimal((await s.execute(text(
+        "SELECT COALESCE(SUM(moved_qty),0) FROM stock_fulfillment WHERE org_id=:o AND sale_order_id=:so"),
+        {"o": org, "so": oid})).scalar_one())
+    assert moved_out == fulfilled == Decimal(6), "goods must move exactly once"
+
+    # invariants still hold
+    on_hand, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == await _ledger_sum(s, org, product, branch, godown)
+    assert reserved == await _active_reserved(s, org, product, branch, godown)
+
+
 async def test_ledger_is_append_only(ctx):
     s, org, branch, godown, product = ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"]
     await eng.move_stock(s, org_id=org, branch_id=branch, godown_id=godown, product_id=product,

@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 import { listParties } from "../parties/api";
 import { listProducts } from "../products/api";
 import { getCurrentStock, listGodowns } from "../stock/api";
-import { cancelOrder, createOrder, listOrders, type SaleOrder } from "./api";
+import { cancelOrder, createOrder, deliverOrder, listOrders, type SaleOrder } from "./api";
 
 const EMPTY = { customer: "", godown: "", product: "", qty: "", rate: "" };
 const STATUS_COLOR: Record<string, "warning" | "success" | "default"> = {
@@ -82,6 +82,19 @@ export function SalesPage() {
       setMsg("Order cancelled — reservation released.");
       qc.invalidateQueries({ queryKey: ["sale-orders"] });
       qc.invalidateQueries({ queryKey: ["stock-current"] });
+    },
+  });
+
+  const deliver = useMutation({
+    mutationFn: (id: number) => deliverOrder(id),
+    onSuccess: (d) => {
+      setMsg(`Dispatched ${d.doc_no} — stock moved once, reservation released, order delivered.`);
+      qc.invalidateQueries({ queryKey: ["sale-orders"] });
+      qc.invalidateQueries({ queryKey: ["stock-current"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(d || "Delivery failed");
     },
   });
 
@@ -152,9 +165,14 @@ export function SalesPage() {
                   <TableCell><Chip size="small" label={o.status} color={STATUS_COLOR[o.status] ?? "default"} /></TableCell>
                   <TableCell align="right">
                     {o.status === "pending" && (
-                      <Button size="small" color="secondary" onClick={() => cancel.mutate(o.id)} disabled={cancel.isPending}>
-                        Cancel
-                      </Button>
+                      <>
+                        <Button size="small" onClick={() => deliver.mutate(o.id)} disabled={deliver.isPending}>
+                          Deliver
+                        </Button>
+                        <Button size="small" color="secondary" onClick={() => cancel.mutate(o.id)} disabled={cancel.isPending}>
+                          Cancel
+                        </Button>
+                      </>
                     )}
                   </TableCell>
                 </TableRow>

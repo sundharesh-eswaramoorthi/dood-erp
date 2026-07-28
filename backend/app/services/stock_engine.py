@@ -194,6 +194,45 @@ async def release_reservations(
     return total
 
 
+async def consume_reservation(
+    session: AsyncSession, *, org_id, order_id, order_line_no, qty: Decimal
+) -> Decimal:
+    """Consume up to `qty` of an order line's active reservation (partial delivery).
+    Reduces both the reservation row and stock_balance.reserved so the invariant
+    reserved == SUM(active reservations) still holds. Returns qty consumed."""
+    row = (
+        await session.execute(
+            text(
+                "SELECT id, product_id, branch_id, godown_id, qty FROM stock_reservation "
+                "WHERE org_id=:o AND source_order_id=:oid AND source_order_line_no=:ln AND status='active' "
+                "FOR UPDATE LIMIT 1"
+            ),
+            {"o": org_id, "oid": order_id, "ln": order_line_no},
+        )
+    ).mappings().first()
+    if row is None:
+        return Decimal(0)  # nothing reserved (e.g. allow-negative product) — nothing to release
+    take = min(Decimal(qty), Decimal(row["qty"]))
+    remaining = Decimal(row["qty"]) - take
+    if remaining <= 0:
+        await session.execute(
+            text("UPDATE stock_reservation SET status='released', released_at=now() WHERE id=:i"),
+            {"i": row["id"]},
+        )
+    else:
+        await session.execute(
+            text("UPDATE stock_reservation SET qty=:q WHERE id=:i"), {"q": remaining, "i": row["id"]}
+        )
+    await session.execute(
+        text(
+            "UPDATE stock_balance SET reserved = reserved - :t, version=version+1, updated_at=now() "
+            "WHERE org_id=:o AND product_id=:p AND branch_id=:b AND godown_id=:g AND location_state='on_hand'"
+        ),
+        {"t": take, "o": org_id, "p": row["product_id"], "b": row["branch_id"], "g": row["godown_id"]},
+    )
+    return take
+
+
 async def move_stock(
     session: AsyncSession,
     *,

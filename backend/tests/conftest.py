@@ -71,6 +71,14 @@ async def ctx(migrated_db):
             text("INSERT INTO party (org_id, branch_id, party_code, name, created_by) VALUES (:o,:b,'C1','Cust',1) RETURNING id"),
             {"o": org, "b": branch},
         )).scalar_one()
+        from app.services.numbering import current_fin_year
+        fy = current_fin_year()
+        for doc_type, prefix in [("sale_order", "SO-"), ("delivery", "DLV-")]:
+            await s.execute(
+                text("INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
+                     "VALUES (:o, NULL, :d, :fy, :px, 4)"),
+                {"o": org, "d": doc_type, "fy": fy, "px": prefix},
+            )
         await s.commit()
         yield {"s": s, "org": org, "branch": branch, "godown": g1, "godown2": g2, "unit": unit, "product": prod, "party": party}
     await engine.dispose()

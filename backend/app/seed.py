@@ -133,7 +133,8 @@ async def seed() -> None:
             for doc_type, prefix in [("stock_adjustment", "ADJ-"), ("stock_transfer", "TRF-"),
                                      ("stock_verification", "VER-"), ("journal", "JV-"),
                                      ("purchase_bill", "PB-"), ("purchase_return", "PR-"),
-                                     ("purchase_order", "PO-"), ("sale_order", "SO-")]:
+                                     ("purchase_order", "PO-"), ("sale_order", "SO-"),
+                                     ("delivery", "DLV-")]:
                 await s.execute(
                     text(
                         "INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "

@@ -27,3 +27,10 @@ export async function cancelOrder(id: number): Promise<SaleOrder> {
   const { data } = await api.post<SaleOrder>(`/api/v1/sales/orders/${id}/cancel`);
   return data;
 }
+
+export async function deliverOrder(id: number): Promise<{ doc_no: string | null; status: string }> {
+  const { data } = await api.post<{ doc_no: string | null; status: string }>(
+    `/api/v1/sales/orders/${id}/deliver`,
+  );
+  return data;
+}
