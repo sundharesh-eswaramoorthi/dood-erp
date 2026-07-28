@@ -17,6 +17,10 @@ celery.conf.update(
         "drain-outbox": {
             "task": "app.workers.tasks.drain_outbox",
             "schedule": 3.0,  # seconds
-        }
+        },
+        "nightly-reconcile": {
+            "task": "app.workers.tasks.nightly_reconcile",
+            "schedule": 60.0,  # demo cadence; "nightly" in prod (Celery Beat crontab)
+        },
     },
 )

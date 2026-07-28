@@ -14,8 +14,10 @@ from app.modules.parties.schemas import (
     DocumentOut,
     GstRegCreate,
     GstRegOut,
+    LedgerEntryCreate,
     PartyCreate,
     PartyDetail,
+    PartyLedgerOut,
     PartyOut,
 )
 
@@ -131,3 +133,24 @@ async def docs_add(party_id: int, payload: DocumentCreate, principal: Principal 
         return await service.add_document(session, principal, party_id, payload)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+
+
+# ---- ledger (receivable / payable) ----
+@router.get("/{party_id}/ledger", response_model=PartyLedgerOut)
+async def ledger_view(party_id: int, principal: Principal = Depends(_read()),
+                      session: AsyncSession = Depends(get_scoped_session)):
+    try:
+        return await service.get_ledger(session, principal, party_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+
+
+@router.post("/{party_id}/ledger/entries", response_model=PartyLedgerOut, status_code=201)
+async def ledger_add(party_id: int, payload: LedgerEntryCreate, principal: Principal = Depends(_write()),
+                     session: AsyncSession = Depends(get_scoped_session)):
+    try:
+        return await service.post_manual_ledger(session, principal, party_id, payload)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

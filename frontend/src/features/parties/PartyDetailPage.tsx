@@ -6,6 +6,7 @@ import {
   Chip,
   Divider,
   Link as MuiLink,
+  MenuItem,
   Stack,
   TextField,
   Typography,
@@ -14,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { addAddress, addContact, addGst, getParty } from "./api";
+import { addAddress, addContact, addGst, addLedgerEntry, getLedger, getParty } from "./api";
 
 export function PartyDetailPage() {
   const { id } = useParams();
@@ -25,8 +26,18 @@ export function PartyDetailPage() {
   const [contact, setContact] = useState({ name: "", phone: "" });
   const [address, setAddress] = useState({ line1: "", city: "", lat: "", lng: "" });
   const [gstin, setGstin] = useState("");
+  const [ledger, setLedger] = useState({ side: "debit", amount: "", note: "" });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["party", partyId] });
+  const ledgerQ = useQuery({ queryKey: ["ledger", partyId], queryFn: () => getLedger(partyId) });
+  const mLedger = useMutation({
+    mutationFn: () =>
+      addLedgerEntry(partyId, { entry_side: ledger.side, amount: ledger.amount, note: ledger.note }),
+    onSuccess: () => {
+      setLedger({ side: "debit", amount: "", note: "" });
+      qc.invalidateQueries({ queryKey: ["ledger", partyId] });
+    },
+  });
 
   const mContact = useMutation({
     mutationFn: () => addContact(partyId, { name: contact.name, phone: contact.phone }),
@@ -221,6 +232,66 @@ export function PartyDetailPage() {
                 Could not add (duplicate GSTIN?)
               </Typography>
             )}
+          </Box>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6">Ledger (outstanding)</Typography>
+          <Stack direction="row" spacing={2} sx={{ my: 1 }}>
+            <Chip color="primary" label={`Receivable ₹${ledgerQ.data?.receivable ?? "0.00"}`} />
+            <Chip label={`Payable ₹${ledgerQ.data?.payable ?? "0.00"}`} />
+            <Chip color="secondary" variant="outlined" label={`Net ₹${ledgerQ.data?.net_balance ?? "0.00"}`} />
+          </Stack>
+          <Divider sx={{ my: 1 }} />
+          {(ledgerQ.data?.entries ?? []).map((e) => (
+            <Typography key={e.id} variant="body2" sx={{ fontFamily: "monospace" }}>
+              {e.effective_date} · {e.entry_side === "debit" ? "Dr" : "Cr"} ₹{e.amount} ·{" "}
+              {e.source_doc_type} #{e.source_doc_id}
+            </Typography>
+          ))}
+          {(ledgerQ.data?.entries ?? []).length === 0 && (
+            <Typography color="text.secondary" variant="body2">
+              No ledger entries yet.
+            </Typography>
+          )}
+          <Box
+            component="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (ledger.amount) mLedger.mutate();
+            }}
+          >
+            <Stack direction="row" spacing={1} sx={{ mt: 2 }} alignItems="center">
+              <TextField
+                size="small"
+                label="Side"
+                select
+                value={ledger.side}
+                onChange={(e) => setLedger({ ...ledger, side: e.target.value })}
+                sx={{ width: 160 }}
+              >
+                <MenuItem value="debit">Debit (they owe us)</MenuItem>
+                <MenuItem value="credit">Credit (we owe them)</MenuItem>
+              </TextField>
+              <TextField
+                size="small"
+                label="Amount"
+                value={ledger.amount}
+                onChange={(e) => setLedger({ ...ledger, amount: e.target.value })}
+                sx={{ width: 140 }}
+              />
+              <TextField
+                size="small"
+                label="Note"
+                value={ledger.note}
+                onChange={(e) => setLedger({ ...ledger, note: e.target.value })}
+              />
+              <Button type="submit" variant="contained" disabled={mLedger.isPending}>
+                Post entry
+              </Button>
+            </Stack>
           </Box>
         </CardContent>
       </Card>

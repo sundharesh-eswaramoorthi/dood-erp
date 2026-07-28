@@ -130,3 +130,32 @@ export async function getActivity(): Promise<Activity> {
   const { data } = await api.get<Activity>("/api/v1/activity");
   return data;
 }
+
+export interface LedgerEntry {
+  id: number;
+  entry_side: string;
+  amount: string;
+  source_doc_type: string;
+  source_doc_id: number;
+  effective_date: string;
+}
+export interface PartyLedger {
+  party_id: number;
+  net_balance: string;
+  receivable: string;
+  payable: string;
+  entries: LedgerEntry[];
+}
+
+export async function getLedger(id: number): Promise<PartyLedger> {
+  const { data } = await api.get<PartyLedger>(`/api/v1/parties/${id}/ledger`);
+  return data;
+}
+
+export async function addLedgerEntry(
+  id: number,
+  payload: { entry_side: string; amount: string; note?: string },
+): Promise<PartyLedger> {
+  const { data } = await api.post<PartyLedger>(`/api/v1/parties/${id}/ledger/entries`, payload);
+  return data;
+}

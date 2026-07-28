@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime as dt
+
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,10 +19,12 @@ from app.modules.parties.schemas import (
     ContactCreate,
     DocumentCreate,
     GstRegCreate,
+    LedgerEntryCreate,
     PartyCreate,
 )
 from app.services.numbering import allocate
 from app.services.outbox import emit
+from app.services.party_ledger import post_entry as post_party_entry
 
 
 async def get_party(session: AsyncSession, party_id: int) -> Party | None:
@@ -185,6 +189,60 @@ async def add_document(
     session.add(row)
     await session.flush()
     return row
+
+
+async def post_manual_ledger(
+    session: AsyncSession, principal: Principal, party_id: int, data: LedgerEntryCreate
+) -> dict:
+    party = await _require_party(session, party_id)
+    number = await allocate(session, principal.org_id, None, "journal")
+    jv_id = (
+        await session.execute(
+            text(
+                "INSERT INTO journal_voucher (org_id, branch_id, party_id, doc_no, note, created_by) "
+                "VALUES (:o, :b, :p, :no, :note, :by) RETURNING id"
+            ),
+            {"o": principal.org_id, "b": party.branch_id, "p": party_id, "no": number,
+             "note": data.note, "by": principal.user_id},
+        )
+    ).scalar_one()
+    await post_party_entry(
+        session,
+        org_id=principal.org_id, branch_id=party.branch_id, party_id=party_id,
+        entry_side=data.entry_side, amount=data.amount,
+        source=("journal_voucher", jv_id, 0),
+        effective_date=data.effective_date or dt.date.today(),
+        created_by=principal.user_id, gst_registration_id=data.gst_registration_id,
+    )
+    await emit(session, principal.org_id, "party.ledger",
+               {"party_id": party_id, "side": data.entry_side, "amount": str(data.amount)})
+    return await get_ledger(session, principal, party_id)
+
+
+async def get_ledger(session: AsyncSession, principal: Principal, party_id: int) -> dict:
+    await _require_party(session, party_id)
+    bal = (
+        await session.execute(
+            text("SELECT net_balance, receivable, payable FROM party_balance WHERE org_id=:o AND party_id=:p"),
+            {"o": principal.org_id, "p": party_id},
+        )
+    ).mappings().first()
+    entries = (
+        await session.execute(
+            text(
+                "SELECT id, entry_side, amount, source_doc_type, source_doc_id, effective_date "
+                "FROM party_ledger_entry WHERE org_id=:o AND party_id=:p ORDER BY id DESC LIMIT 100"
+            ),
+            {"o": principal.org_id, "p": party_id},
+        )
+    ).mappings().all()
+    return {
+        "party_id": party_id,
+        "net_balance": bal["net_balance"] if bal else 0,
+        "receivable": bal["receivable"] if bal else 0,
+        "payable": bal["payable"] if bal else 0,
+        "entries": [dict(e) for e in entries],
+    }
 
 
 async def get_party_detail(session: AsyncSession, party_id: int) -> dict:

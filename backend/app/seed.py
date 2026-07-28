@@ -131,7 +131,7 @@ async def seed() -> None:
                 )
             # org-wide numbering series for stock documents
             for doc_type, prefix in [("stock_adjustment", "ADJ-"), ("stock_transfer", "TRF-"),
-                                     ("stock_verification", "VER-")]:
+                                     ("stock_verification", "VER-"), ("journal", "JV-")]:
                 await s.execute(
                     text(
                         "INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "

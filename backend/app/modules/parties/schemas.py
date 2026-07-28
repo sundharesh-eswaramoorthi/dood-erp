@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -120,3 +121,31 @@ class PartyDetail(PartyOut):
     addresses: list[AddressOut] = []
     gst_registrations: list[GstRegOut] = []
     documents: list[DocumentOut] = []
+
+
+# ---- party ledger ----
+class LedgerEntryCreate(BaseModel):
+    entry_side: str = Field(pattern="^(debit|credit)$")
+    amount: Decimal = Field(gt=0)
+    note: str | None = None
+    effective_date: dt.date | None = None
+    gst_registration_id: int | None = None
+
+
+class LedgerEntryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    entry_side: str
+    amount: Decimal
+    source_doc_type: str
+    source_doc_id: int
+    effective_date: dt.date
+
+
+class PartyLedgerOut(BaseModel):
+    party_id: int
+    net_balance: Decimal
+    receivable: Decimal
+    payable: Decimal
+    entries: list[LedgerEntryOut]
