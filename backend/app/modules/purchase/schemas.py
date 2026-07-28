@@ -46,3 +46,49 @@ class PurchaseBillOut(BaseModel):
     tax_total: Decimal
     grand_total: Decimal
     lines: list[BillLineOut]
+
+
+# ---- returns ----
+class PurchaseReturnCreate(BaseModel):
+    supplier_id: int
+    godown_id: int
+    branch_id: int | None = None
+    orig_bill_id: int | None = None
+    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
+    return_date: dt.date | None = None
+    lines: list[BillLineIn] = Field(min_length=1)
+
+
+class PurchaseReturnOut(BaseModel):
+    id: int
+    doc_no: str | None
+    status: str
+    supplier_id: int
+    taxable_total: Decimal
+    tax_total: Decimal
+    grand_total: Decimal
+    lines: list[BillLineOut]
+
+
+# ---- purchase order (optional / feature-flagged) ----
+class POLineIn(BaseModel):
+    product_id: int
+    entered_qty: Decimal = Field(gt=0)
+    entered_unit_id: int
+    rate: Decimal = Field(default=Decimal(0), ge=0)
+
+
+class PurchaseOrderCreate(BaseModel):
+    supplier_id: int
+    branch_id: int | None = None
+    order_date: dt.date | None = None
+    expected_date: dt.date | None = None
+    note: str | None = None
+    lines: list[POLineIn] = Field(min_length=1)
+
+
+class PurchaseOrderOut(BaseModel):
+    id: int
+    doc_no: str | None
+    status: str
+    supplier_id: int

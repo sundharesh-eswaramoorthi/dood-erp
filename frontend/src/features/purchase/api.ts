@@ -37,3 +37,31 @@ export async function listBills(): Promise<PurchaseBill[]> {
   const { data } = await api.get<PurchaseBill[]>("/api/v1/purchase/bills");
   return data;
 }
+
+export async function createReturn(payload: PurchaseBillCreate & { orig_bill_id?: number }): Promise<PurchaseBill> {
+  const { data } = await api.post<PurchaseBill>("/api/v1/purchase/returns", payload, {
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+  });
+  return data;
+}
+
+export interface PurchaseOrder {
+  id: number;
+  doc_no: string | null;
+  status: string;
+  supplier_id: number;
+  order_date?: string;
+}
+
+export async function createOrder(payload: {
+  supplier_id: number;
+  lines: { product_id: number; entered_qty: string; entered_unit_id: number; rate: string }[];
+}): Promise<PurchaseOrder> {
+  const { data } = await api.post<PurchaseOrder>("/api/v1/purchase/orders", payload);
+  return data;
+}
+
+export async function listOrders(): Promise<PurchaseOrder[]> {
+  const { data } = await api.get<PurchaseOrder[]>("/api/v1/purchase/orders");
+  return data;
+}
