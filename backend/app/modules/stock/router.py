@@ -5,7 +5,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Principal, get_scoped_session, require_permission
 from app.modules.stock import service
-from app.modules.stock.schemas import AdjustmentCreate, AdjustmentOut, CurrentStockOut, MovementOut
+from app.modules.stock.schemas import (
+    AdjustmentCreate,
+    AdjustmentOut,
+    CurrentStockOut,
+    MovementOut,
+    TransferCreate,
+    TransferOut,
+    VerificationCreate,
+    VerificationOut,
+)
 from app.services.stock_engine import OverSell
 
 router = APIRouter()
@@ -69,3 +78,77 @@ async def reconcile(
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.reconcile(session, principal)
+
+
+# ---- transfers ----
+@router.post("/transfers", response_model=TransferOut, status_code=status.HTTP_201_CREATED)
+async def transfer_create(
+    payload: TransferCreate,
+    principal: Principal = Depends(require_permission("stock.write")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.create_transfer(session, principal, payload)
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.post("/transfers/{transfer_id}/dispatch", response_model=TransferOut)
+async def transfer_dispatch(
+    transfer_id: int,
+    principal: Principal = Depends(require_permission("stock.write")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.dispatch_transfer(session, principal, transfer_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Transfer not found")
+    except OverSell as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.post("/transfers/{transfer_id}/receive", response_model=TransferOut)
+async def transfer_receive(
+    transfer_id: int,
+    principal: Principal = Depends(require_permission("stock.write")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.receive_transfer(session, principal, transfer_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Transfer not found")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+# ---- verification (snapshot-delta) ----
+@router.post("/verifications", response_model=VerificationOut, status_code=status.HTTP_201_CREATED)
+async def verification_create(
+    payload: VerificationCreate,
+    principal: Principal = Depends(require_permission("stock.write")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.create_verification(session, principal, payload)
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.post("/verifications/{verification_id}/post", response_model=VerificationOut)
+async def verification_post(
+    verification_id: int,
+    principal: Principal = Depends(require_permission("stock.write")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.post_verification(session, principal, verification_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Verification not found")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

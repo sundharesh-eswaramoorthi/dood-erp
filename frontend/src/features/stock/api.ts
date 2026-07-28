@@ -76,3 +76,63 @@ export async function reconcile(): Promise<{ ok: boolean; drift_rows: unknown[] 
   const { data } = await api.post<{ ok: boolean; drift_rows: unknown[] }>("/api/v1/stock/reconcile");
   return data;
 }
+
+// ---- transfers ----
+export interface TransferLine {
+  line_no: number;
+  product_id: number;
+  base_qty: string;
+  unit_cost: string | null;
+}
+export interface Transfer {
+  id: number;
+  doc_no: string | null;
+  status: string;
+  from_godown_id: number;
+  to_godown_id: number;
+  lines: TransferLine[];
+}
+
+export async function createTransfer(payload: {
+  from_godown_id: number;
+  to_godown_id: number;
+  lines: { product_id: number; entered_qty: string; entered_unit_id: number }[];
+}): Promise<Transfer> {
+  const { data } = await api.post<Transfer>("/api/v1/stock/transfers", payload);
+  return data;
+}
+export async function dispatchTransfer(id: number): Promise<Transfer> {
+  const { data } = await api.post<Transfer>(`/api/v1/stock/transfers/${id}/dispatch`);
+  return data;
+}
+export async function receiveTransfer(id: number): Promise<Transfer> {
+  const { data } = await api.post<Transfer>(`/api/v1/stock/transfers/${id}/receive`);
+  return data;
+}
+
+// ---- verification (snapshot-delta) ----
+export interface VerifyLine {
+  line_no: number;
+  product_id: number;
+  system_qty_at_start: string;
+  physical_qty: string | null;
+  delta: string | null;
+}
+export interface Verification {
+  id: number;
+  doc_no: string | null;
+  status: string;
+  lines: VerifyLine[];
+}
+
+export async function createVerification(payload: {
+  godown_id: number;
+  lines: { product_id: number; physical_qty: string }[];
+}): Promise<Verification> {
+  const { data } = await api.post<Verification>("/api/v1/stock/verifications", payload);
+  return data;
+}
+export async function postVerification(id: number): Promise<Verification> {
+  const { data } = await api.post<Verification>(`/api/v1/stock/verifications/${id}/post`);
+  return data;
+}

@@ -11,6 +11,7 @@ import { PartyDetailPage } from "./features/parties/PartyDetailPage";
 import { ProductsPage } from "./features/products/ProductsPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { StockPage } from "./features/stock/StockPage";
+import { TransfersPage } from "./features/stock/TransfersPage";
 import { UnitsPage } from "./features/units/UnitsPage";
 import { theme } from "./theme";
 
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/parties/:id" element={<PartyDetailPage />} />
               <Route path="/products" element={<ProductsPage />} />
               <Route path="/stock" element={<StockPage />} />
+              <Route path="/transfers" element={<TransfersPage />} />
               <Route path="/units" element={<UnitsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>

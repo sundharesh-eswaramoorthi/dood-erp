@@ -62,14 +62,15 @@ async def seed() -> None:
                     o=org_id, n="Main Branch",
                 )
 
-            godown_id = await _scalar(
-                s, "SELECT id FROM godown WHERE branch_id=:b LIMIT 1", b=branch_id
-            )
-            if godown_id is None:
-                await s.execute(
-                    text("INSERT INTO godown (org_id, branch_id, name) VALUES (:o, :b, :n)"),
-                    {"o": org_id, "b": branch_id, "n": "Main Godown"},
+            for gname in ("Main Godown", "Secondary Godown"):
+                exists_g = await _scalar(
+                    s, "SELECT id FROM godown WHERE branch_id=:b AND name=:n", b=branch_id, n=gname
                 )
+                if exists_g is None:
+                    await s.execute(
+                        text("INSERT INTO godown (org_id, branch_id, name) VALUES (:o, :b, :n)"),
+                        {"o": org_id, "b": branch_id, "n": gname},
+                    )
 
             for code, desc in PERMISSIONS:
                 await s.execute(

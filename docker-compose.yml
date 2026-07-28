@@ -39,6 +39,9 @@ services:
       POSTGRES_HOST: postgres
       REDIS_URL: redis://redis:6379/0
       MONGO_URL: mongodb://mongo:27017
+      # macOS bind mounts don't deliver inotify events reliably; poll so
+      # uvicorn --reload actually reloads on edits.
+      WATCHFILES_FORCE_POLLING: "true"
     command: >
       bash -c "alembic upgrade head &&
                python -m app.seed &&
