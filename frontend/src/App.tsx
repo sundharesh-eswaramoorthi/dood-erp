@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "./app/queryClient";
 import { Layout } from "./components/Layout";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { AccountsPage } from "./features/accounts/AccountsPage";
 import { LoginPage } from "./features/auth/LoginPage";
 import { PartiesPage } from "./features/parties/PartiesPage";
 import { PartyDetailPage } from "./features/parties/PartyDetailPage";
@@ -38,6 +39,7 @@ export default function App() {
               <Route path="/stock" element={<StockPage />} />
               <Route path="/purchase" element={<PurchasePage />} />
               <Route path="/sales" element={<SalesPage />} />
+              <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/transfers" element={<TransfersPage />} />
               <Route path="/units" element={<UnitsPage />} />
               <Route path="/settings" element={<SettingsPage />} />

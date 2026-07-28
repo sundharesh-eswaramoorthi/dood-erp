@@ -25,6 +25,7 @@ PERMISSIONS = [
     ("purchase.create", "Create purchase bills"),
     ("reports.view", "View reports"),
     ("settings.manage", "Manage settings & users"),
+    ("accounts.manage", "Manage bank accounts & payments"),
 ]
 
 ROLES = [
@@ -135,7 +136,7 @@ async def seed() -> None:
                                      ("purchase_bill", "PB-"), ("purchase_return", "PR-"),
                                      ("purchase_order", "PO-"), ("sale_order", "SO-"),
                                      ("delivery", "DLV-"), ("sales_bill", "SB-"),
-                                     ("sales_return", "SR-")]:
+                                     ("sales_return", "SR-"), ("payment_voucher", "PV-")]:
                 await s.execute(
                     text(
                         "INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
@@ -180,6 +181,16 @@ async def seed() -> None:
                         "ON CONFLICT (org_id, name) DO NOTHING"
                     ),
                     {"o": org_id, "n": name, "c": color},
+                )
+
+            # default cash/bank accounts
+            for aname, atype in [("Cash", "cash"), ("HDFC Bank", "bank"), ("Petty Cash", "petty_cash")]:
+                await s.execute(
+                    text(
+                        "INSERT INTO cash_bank_account (org_id, name, account_type) VALUES (:o, :n, :t) "
+                        "ON CONFLICT (org_id, name) DO NOTHING"
+                    ),
+                    {"o": org_id, "n": aname, "t": atype},
                 )
 
             # feature flags (Purchase Order toggle etc.)

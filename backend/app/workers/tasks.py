@@ -63,6 +63,14 @@ LEFT JOIN (SELECT org_id,party_id,
   ON e.org_id=p.org_id AND e.party_id=p.party_id
 WHERE p.net_balance <> COALESCE(e.s,0)
 """
+_ACCOUNT_DRIFT = """
+SELECT count(*) FROM cash_bank_account a
+LEFT JOIN (SELECT org_id,account_id,
+                  SUM(CASE direction WHEN 'in' THEN amount ELSE -amount END) s
+           FROM account_ledger_entry GROUP BY 1,2) e
+  ON e.org_id=a.org_id AND e.account_id=a.id
+WHERE a.current_balance <> a.opening_balance + COALESCE(e.s,0)
+"""
 
 
 @celery.task(name="app.workers.tasks.nightly_reconcile")
@@ -72,8 +80,9 @@ def nightly_reconcile() -> dict:
         stock = conn.execute(text(_STOCK_DRIFT)).scalar_one()
         reserved = conn.execute(text(_RESERVED_DRIFT)).scalar_one()
         party = conn.execute(text(_PARTY_DRIFT)).scalar_one()
+        account = conn.execute(text(_ACCOUNT_DRIFT)).scalar_one()
     result = {"stock_drift": stock, "reserved_drift": reserved, "party_drift": party,
-              "ok": (stock == 0 and reserved == 0 and party == 0)}
+              "account_drift": account, "ok": (stock == 0 and reserved == 0 and party == 0 and account == 0)}
     _redis.set("reconcile:last", str(result))
     if not result["ok"]:
         print(f"[reconcile] DRIFT DETECTED: {result}")

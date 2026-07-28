@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.middleware import IdempotencyMiddleware
+from app.modules.accounts.router import router as accounts_router
 from app.modules.activity.router import router as activity_router
 from app.modules.auth.router import router as auth_router
 from app.modules.health.router import router as health_router
@@ -35,6 +36,7 @@ app.include_router(products_router, prefix="/api/v1/products", tags=["products"]
 app.include_router(stock_router, prefix="/api/v1/stock", tags=["stock"])
 app.include_router(purchase_router, prefix="/api/v1/purchase", tags=["purchase"])
 app.include_router(sales_router, prefix="/api/v1/sales", tags=["sales"])
+app.include_router(accounts_router, prefix="/api/v1/accounts", tags=["accounts"])
 app.include_router(settings_router, prefix="/api/v1", tags=["settings"])
 app.include_router(activity_router, prefix="/api/v1/activity", tags=["activity"])
 
