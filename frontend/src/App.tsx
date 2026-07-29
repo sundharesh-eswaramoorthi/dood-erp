@@ -18,6 +18,7 @@ import { SettingsPage } from "./features/settings/SettingsPage";
 import { StockPage } from "./features/stock/StockPage";
 import { TransfersPage } from "./features/stock/TransfersPage";
 import { UnitsPage } from "./features/units/UnitsPage";
+import { UsersPage } from "./features/users/UsersPage";
 import { theme } from "./theme";
 
 export default function App() {
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/reports" element={<ReportsPage />} />
               <Route path="/transfers" element={<TransfersPage />} />
               <Route path="/units" element={<UnitsPage />} />
+              <Route path="/users" element={<UsersPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

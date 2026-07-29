@@ -36,6 +36,15 @@ ROLES = [
     ("delivery_boy", "Delivery Boy"),
 ]
 
+# role -> permission codes (super_user uses the "*" wildcard via is_superuser)
+ROLE_PERMS = {
+    "manager": ["party.read", "party.create", "product.read", "product.create", "stock.read",
+                "stock.write", "sales.create", "purchase.create", "reports.view", "accounts.manage"],
+    "stock_manager": ["product.read", "product.create", "stock.read", "stock.write"],
+    "salesman": ["party.read", "party.create", "product.read", "stock.read", "sales.create"],
+    "delivery_boy": ["sales.create"],
+}
+
 
 async def _scalar(conn, sql: str, **params):
     return (await conn.execute(text(sql), params)).scalar()
@@ -90,6 +99,16 @@ async def seed() -> None:
                     ),
                     {"o": org_id, "c": code, "n": name},
                 )
+
+            # role -> permission mappings
+            for role_code, perms in ROLE_PERMS.items():
+                rid = await _scalar(s, "SELECT id FROM role WHERE org_id=:o AND code=:c", o=org_id, c=role_code)
+                for perm in perms:
+                    await s.execute(
+                        text("INSERT INTO role_permission (role_id, permission_code) VALUES (:r, :p) "
+                             "ON CONFLICT DO NOTHING"),
+                        {"r": rid, "p": perm},
+                    )
 
             # super-user
             user_id = await _scalar(

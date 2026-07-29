@@ -14,6 +14,7 @@ const NAV = [
   { to: "/reports", label: "Reports", end: false },
   { to: "/transfers", label: "Transfers", end: false },
   { to: "/units", label: "Units", end: false },
+  { to: "/users", label: "Users", end: false },
   { to: "/settings", label: "Settings", end: false },
 ];
 

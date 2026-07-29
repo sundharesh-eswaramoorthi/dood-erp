@@ -16,6 +16,7 @@ from app.modules.sales.router import router as sales_router
 from app.modules.settings.router import router as settings_router
 from app.modules.stock.router import router as stock_router
 from app.modules.units.router import router as units_router
+from app.modules.users.router import router as users_router
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0")
 
@@ -41,6 +42,7 @@ app.include_router(sales_router, prefix="/api/v1/sales", tags=["sales"])
 app.include_router(accounts_router, prefix="/api/v1/accounts", tags=["accounts"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
+app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(settings_router, prefix="/api/v1", tags=["settings"])
 app.include_router(activity_router, prefix="/api/v1/activity", tags=["activity"])
 
