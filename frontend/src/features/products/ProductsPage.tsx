@@ -21,7 +21,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { listUnits } from "../units/api";
-import { createProduct, listCategories, listProducts, type Product } from "./api";
+import { createCategory, createProduct, listCategories, listProducts, type Product } from "./api";
 
 const EMPTY = {
   code: "",
@@ -36,6 +36,7 @@ const EMPTY = {
 export function ProductsPage() {
   const qc = useQueryClient();
   const [form, setForm] = useState(EMPTY);
+  const [newCat, setNewCat] = useState("");
 
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const categories = useQuery({ queryKey: ["categories"], queryFn: listCategories });
@@ -64,6 +65,14 @@ export function ProductsPage() {
     },
   });
 
+  const addCat = useMutation({
+    mutationFn: () => createCategory({ name: newCat }),
+    onSuccess: () => {
+      setNewCat("");
+      qc.invalidateQueries({ queryKey: ["categories"] });
+    },
+  });
+
   const canSubmit = form.code && form.name && form.base_unit_id;
 
   return (
@@ -71,6 +80,24 @@ export function ProductsPage() {
       <Typography variant="h4" fontWeight={800}>
         Products
       </Typography>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Categories
+          </Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }} alignItems="center">
+            {(categories.data ?? []).map((c) => (<Chip key={c.id} label={c.name} />))}
+            {(categories.data ?? []).length === 0 && <Typography variant="body2" color="text.secondary">No categories.</Typography>}
+          </Stack>
+          <Box component="form" onSubmit={(e) => { e.preventDefault(); if (newCat) addCat.mutate(); }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField size="small" label="New category" value={newCat} onChange={(e) => setNewCat(e.target.value)} />
+              <Button type="submit" variant="outlined" disabled={addCat.isPending}>Add category</Button>
+            </Stack>
+          </Box>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent>

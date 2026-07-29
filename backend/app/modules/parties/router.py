@@ -19,6 +19,8 @@ from app.modules.parties.schemas import (
     PartyDetail,
     PartyLedgerOut,
     PartyOut,
+    TagAssignIn,
+    TagRef,
 )
 
 router = APIRouter()
@@ -131,6 +133,25 @@ async def docs_add(party_id: int, payload: DocumentCreate, principal: Principal 
                    session: AsyncSession = Depends(get_scoped_session)):
     try:
         return await service.add_document(session, principal, party_id, payload)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+
+
+# ---- tags ----
+@router.post("/{party_id}/tags", response_model=list[TagRef])
+async def tag_add(party_id: int, payload: TagAssignIn, principal: Principal = Depends(_write()),
+                  session: AsyncSession = Depends(get_scoped_session)):
+    try:
+        return await service.add_tag(session, principal, party_id, payload.tag_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+
+
+@router.delete("/{party_id}/tags/{tag_id}", response_model=list[TagRef])
+async def tag_remove(party_id: int, tag_id: int, principal: Principal = Depends(_write()),
+                     session: AsyncSession = Depends(get_scoped_session)):
+    try:
+        return await service.remove_tag(session, principal, party_id, tag_id)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
 

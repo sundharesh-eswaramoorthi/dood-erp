@@ -60,11 +60,18 @@ export interface PartyDocument {
   content_type: string | null;
 }
 
+export interface TagRef {
+  id: number;
+  name: string;
+  color: string;
+}
+
 export interface PartyDetail extends Party {
   contacts: Contact[];
   addresses: Address[];
   gst_registrations: GstReg[];
   documents: PartyDocument[];
+  tags: TagRef[];
 }
 
 export interface ActivityItem {
@@ -128,6 +135,24 @@ export async function addGst(
 
 export async function getActivity(): Promise<Activity> {
   const { data } = await api.get<Activity>("/api/v1/activity");
+  return data;
+}
+
+export async function addTag(id: number, tagId: number): Promise<TagRef[]> {
+  const { data } = await api.post<TagRef[]>(`/api/v1/parties/${id}/tags`, { tag_id: tagId });
+  return data;
+}
+
+export async function removeTag(id: number, tagId: number): Promise<TagRef[]> {
+  const { data } = await api.delete<TagRef[]>(`/api/v1/parties/${id}/tags/${tagId}`);
+  return data;
+}
+
+export async function addDocument(
+  id: number,
+  payload: { doc_type: string; file_name: string; storage_key: string },
+): Promise<PartyDocument> {
+  const { data } = await api.post<PartyDocument>(`/api/v1/parties/${id}/documents`, payload);
   return data;
 }
 

@@ -7,7 +7,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Principal
-from app.modules.stock.schemas import AdjustmentCreate, TransferCreate, VerificationCreate
+from app.modules.stock.schemas import (
+    AdjustmentCreate,
+    ReorderSet,
+    TransferCreate,
+    VerificationCreate,
+)
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
 from app.services.outbox import emit
@@ -354,6 +359,33 @@ async def post_verification(session: AsyncSession, principal: Principal, verific
     )
     await emit(session, principal.org_id, "stock.moved", {"doc": "stock_verification", "id": verification_id})
     return {"id": verification_id, "doc_no": hdr["doc_no"], "status": "posted", "lines": out}
+
+
+async def set_reorder(session: AsyncSession, principal: Principal, data: ReorderSet) -> dict:
+    branch_id = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
+    if branch_id is None:
+        raise ValueError("Caller has no branch access")
+    if branch_id not in principal.branch_ids:
+        raise PermissionError("Branch not permitted")
+    await session.execute(
+        text(
+            "INSERT INTO reorder_threshold (org_id, branch_id, product_id, godown_id, min_qty) "
+            "VALUES (:o,:b,:p,:g,:m) "
+            "ON CONFLICT (org_id, product_id, branch_id, COALESCE(godown_id,0)) "
+            "DO UPDATE SET min_qty = EXCLUDED.min_qty"
+        ),
+        {"o": principal.org_id, "b": branch_id, "p": data.product_id, "g": data.godown_id, "m": data.min_qty},
+    )
+    return {"product_id": data.product_id, "branch_id": branch_id, "godown_id": data.godown_id, "min_qty": data.min_qty}
+
+
+async def list_reorder(session: AsyncSession, principal: Principal) -> list[dict]:
+    rows = (
+        await session.execute(
+            text("SELECT product_id, branch_id, godown_id, min_qty FROM reorder_threshold ORDER BY product_id")
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
 
 
 async def reconcile(session: AsyncSession, principal: Principal) -> dict:

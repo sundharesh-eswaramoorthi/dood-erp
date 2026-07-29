@@ -10,6 +10,8 @@ from app.modules.stock.schemas import (
     AdjustmentOut,
     CurrentStockOut,
     MovementOut,
+    ReorderOut,
+    ReorderSet,
     TransferCreate,
     TransferOut,
     VerificationCreate,
@@ -78,6 +80,29 @@ async def reconcile(
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.reconcile(session, principal)
+
+
+# ---- reorder thresholds (drive low-stock alerts) ----
+@router.get("/reorder-thresholds", response_model=list[ReorderOut])
+async def list_reorder(
+    principal: Principal = Depends(require_permission("stock.read")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_reorder(session, principal)
+
+
+@router.post("/reorder-thresholds", response_model=ReorderOut, status_code=status.HTTP_201_CREATED)
+async def set_reorder(
+    payload: ReorderSet,
+    principal: Principal = Depends(require_permission("stock.write")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.set_reorder(session, principal, payload)
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
 
 # ---- transfers ----

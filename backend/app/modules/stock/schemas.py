@@ -64,6 +64,20 @@ class MovementOut(BaseModel):
     effective_date: dt.date
 
 
+class ReorderSet(BaseModel):
+    product_id: int
+    min_qty: Decimal = Field(ge=0)
+    branch_id: int | None = None
+    godown_id: int | None = None
+
+
+class ReorderOut(BaseModel):
+    product_id: int
+    branch_id: int
+    godown_id: int | None
+    min_qty: Decimal
+
+
 # ---- transfers ----
 class TransferLineIn(BaseModel):
     product_id: int

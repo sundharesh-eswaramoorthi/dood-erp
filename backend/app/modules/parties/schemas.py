@@ -116,11 +116,24 @@ class DocumentOut(BaseModel):
     content_type: str | None
 
 
+class TagRef(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    color: str
+
+
+class TagAssignIn(BaseModel):
+    tag_id: int
+
+
 class PartyDetail(PartyOut):
     contacts: list[ContactOut] = []
     addresses: list[AddressOut] = []
     gst_registrations: list[GstRegOut] = []
     documents: list[DocumentOut] = []
+    tags: list[TagRef] = []
 
 
 # ---- party ledger ----

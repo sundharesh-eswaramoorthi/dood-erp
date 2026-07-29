@@ -15,7 +15,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { addAddress, addContact, addGst, addLedgerEntry, getLedger, getParty } from "./api";
+import { listTags } from "../settings/api";
+import {
+  addAddress,
+  addContact,
+  addDocument,
+  addGst,
+  addLedgerEntry,
+  addTag,
+  getLedger,
+  getParty,
+  removeTag,
+} from "./api";
 
 export function PartyDetailPage() {
   const { id } = useParams();
@@ -27,8 +38,21 @@ export function PartyDetailPage() {
   const [address, setAddress] = useState({ line1: "", city: "", lat: "", lng: "" });
   const [gstin, setGstin] = useState("");
   const [ledger, setLedger] = useState({ side: "debit", amount: "", note: "" });
+  const [tagSel, setTagSel] = useState("");
+  const [doc, setDoc] = useState({ doc_type: "GST Certificate", file_name: "" });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["party", partyId] });
+  const allTags = useQuery({ queryKey: ["tags"], queryFn: listTags });
+  const mAddTag = useMutation({ mutationFn: (tid: number) => addTag(partyId, tid), onSuccess: invalidate });
+  const mRemoveTag = useMutation({ mutationFn: (tid: number) => removeTag(partyId, tid), onSuccess: invalidate });
+  const mDoc = useMutation({
+    mutationFn: () =>
+      addDocument(partyId, { doc_type: doc.doc_type, file_name: doc.file_name, storage_key: `parties/${partyId}/${doc.file_name}` }),
+    onSuccess: () => {
+      setDoc({ ...doc, file_name: "" });
+      invalidate();
+    },
+  });
   const ledgerQ = useQuery({ queryKey: ["ledger", partyId], queryFn: () => getLedger(partyId) });
   const mLedger = useMutation({
     mutationFn: () =>
@@ -88,6 +112,40 @@ export function PartyDetailPage() {
           Phone {p.phone || "—"} · PAN {p.pan || "—"} · Credit limit {p.credit_limit || "—"}
         </Typography>
       </Box>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6">Tags</Typography>
+          <Divider sx={{ my: 1 }} />
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
+            {p.tags.map((t) => (
+              <Chip
+                key={t.id}
+                label={t.name}
+                onDelete={() => mRemoveTag.mutate(t.id)}
+                sx={{ bgcolor: t.color, color: "#fff", "& .MuiChip-deleteIcon": { color: "rgba(255,255,255,0.8)" } }}
+              />
+            ))}
+            {p.tags.length === 0 && <Typography variant="body2" color="text.secondary">No tags.</Typography>}
+            <TextField
+              size="small"
+              select
+              label="Add tag"
+              value={tagSel}
+              onChange={(e) => {
+                const tid = Number(e.target.value);
+                setTagSel("");
+                if (tid) mAddTag.mutate(tid);
+              }}
+              sx={{ minWidth: 160, ml: "auto" }}
+            >
+              {(allTags.data ?? [])
+                .filter((t) => !p.tags.some((pt) => pt.id === t.id))
+                .map((t) => (<MenuItem key={t.id} value={String(t.id)}>{t.name}</MenuItem>))}
+            </TextField>
+          </Stack>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent>
@@ -233,6 +291,40 @@ export function PartyDetailPage() {
               </Typography>
             )}
           </Box>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6">Documents</Typography>
+          <Divider sx={{ my: 1 }} />
+          {p.documents.map((d) => (
+            <Typography key={d.id} variant="body2">
+              • <strong>{d.doc_type}</strong>: {d.file_name}
+            </Typography>
+          ))}
+          {p.documents.length === 0 && <Typography variant="body2" color="text.secondary">No documents.</Typography>}
+          <Box
+            component="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (doc.file_name) mDoc.mutate();
+            }}
+          >
+            <Stack direction="row" spacing={1} sx={{ mt: 2 }} alignItems="center" flexWrap="wrap" useFlexGap>
+              <TextField size="small" select label="Type" value={doc.doc_type} onChange={(e) => setDoc({ ...doc, doc_type: e.target.value })} sx={{ width: 190 }}>
+                <MenuItem value="GST Certificate">GST Certificate</MenuItem>
+                <MenuItem value="KYC">KYC</MenuItem>
+                <MenuItem value="PAN Card">PAN Card</MenuItem>
+                <MenuItem value="Other">Other</MenuItem>
+              </TextField>
+              <TextField size="small" label="File name" value={doc.file_name} onChange={(e) => setDoc({ ...doc, file_name: e.target.value })} />
+              <Button type="submit" variant="contained" disabled={mDoc.isPending}>Add document</Button>
+            </Stack>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            Metadata only (no file upload in this build; storage_key is generated).
+          </Typography>
         </CardContent>
       </Card>
 

@@ -20,7 +20,7 @@ import { useEffect, useState } from "react";
 
 import { listProducts } from "../products/api";
 import { listUnits } from "../units/api";
-import { getCurrentStock, getMovements, listGodowns, postAdjustment, reconcile } from "./api";
+import { getCurrentStock, getMovements, listGodowns, listReorder, postAdjustment, reconcile, setReorder } from "./api";
 
 const REASONS = ["opening", "increase", "decrease", "damage", "shortage"];
 const INBOUND = new Set(["opening", "increase"]);
@@ -33,6 +33,7 @@ export function StockPage() {
 
   const [productId, setProductId] = useState<number | "">("");
   const [form, setForm] = useState({ godown_id: "", reason: "opening", qty: "", unit_id: "", cost: "" });
+  const [reorderQty, setReorderQty] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
   // default selected product + its base unit
@@ -91,6 +92,18 @@ export function StockPage() {
   const verify = useMutation({
     mutationFn: reconcile,
     onSuccess: (r) => setMsg(r.ok ? "✓ Integrity OK — balances match the ledger." : "⚠ Drift detected!"),
+  });
+
+  const reorders = useQuery({ queryKey: ["reorders"], queryFn: listReorder });
+  const currentReorder = reorders.data?.find((r) => r.product_id === productId)?.min_qty;
+  const mReorder = useMutation({
+    mutationFn: () => setReorder({ product_id: productId as number, min_qty: reorderQty }),
+    onSuccess: () => {
+      setMsg("Reorder level saved — low-stock alerts will use it.");
+      setReorderQty("");
+      qc.invalidateQueries({ queryKey: ["reorders"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 
   const unitCode = (id: number) => units.data?.find((u) => u.id === id)?.code ?? id;
@@ -164,6 +177,31 @@ export function StockPage() {
           ) : (
             <Typography color="text.secondary">Select a product.</Typography>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Reorder level
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            Current: {currentReorder ? `${currentReorder} (base units)` : "not set"} — stock below this shows in the low-stock alert &amp; dashboard.
+          </Typography>
+          <Box
+            component="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (productId !== "" && reorderQty) mReorder.mutate();
+            }}
+          >
+            <Stack direction="row" spacing={2} alignItems="center">
+              <TextField label="Min qty (base)" value={reorderQty} onChange={(e) => setReorderQty(e.target.value)} sx={{ width: 160 }} />
+              <Button type="submit" variant="outlined" disabled={mReorder.isPending || productId === ""}>
+                Set reorder level
+              </Button>
+            </Stack>
+          </Box>
         </CardContent>
       </Card>
 

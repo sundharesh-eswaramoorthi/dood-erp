@@ -77,6 +77,23 @@ export async function reconcile(): Promise<{ ok: boolean; drift_rows: unknown[] 
   return data;
 }
 
+export interface Reorder {
+  product_id: number;
+  branch_id: number;
+  godown_id: number | null;
+  min_qty: string;
+}
+
+export async function listReorder(): Promise<Reorder[]> {
+  const { data } = await api.get<Reorder[]>("/api/v1/stock/reorder-thresholds");
+  return data;
+}
+
+export async function setReorder(payload: { product_id: number; min_qty: string }): Promise<Reorder> {
+  const { data } = await api.post<Reorder>("/api/v1/stock/reorder-thresholds", payload);
+  return data;
+}
+
 // ---- transfers ----
 export interface TransferLine {
   line_no: number;

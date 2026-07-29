@@ -245,6 +245,44 @@ async def get_ledger(session: AsyncSession, principal: Principal, party_id: int)
     }
 
 
+async def list_party_tags(session: AsyncSession, party_id: int) -> list[dict]:
+    rows = (
+        await session.execute(
+            text(
+                "SELECT td.id, td.name, td.color FROM tag_assignment ta "
+                "JOIN tag_definition td ON td.id = ta.tag_id "
+                "WHERE ta.entity_type='party' AND ta.entity_id=:p ORDER BY td.name"
+            ),
+            {"p": party_id},
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+async def add_tag(session: AsyncSession, principal: Principal, party_id: int, tag_id: int) -> list[dict]:
+    await _require_party(session, party_id)  # 404 if not visible
+    await session.execute(
+        text(
+            "INSERT INTO tag_assignment (org_id, tag_id, entity_type, entity_id) "
+            "VALUES (:o, :t, 'party', :p) ON CONFLICT DO NOTHING"
+        ),
+        {"o": principal.org_id, "t": tag_id, "p": party_id},
+    )
+    return await list_party_tags(session, party_id)
+
+
+async def remove_tag(session: AsyncSession, principal: Principal, party_id: int, tag_id: int) -> list[dict]:
+    await _require_party(session, party_id)
+    await session.execute(
+        text(
+            "DELETE FROM tag_assignment WHERE org_id=:o AND tag_id=:t "
+            "AND entity_type='party' AND entity_id=:p"
+        ),
+        {"o": principal.org_id, "t": tag_id, "p": party_id},
+    )
+    return await list_party_tags(session, party_id)
+
+
 async def get_party_detail(session: AsyncSession, party_id: int) -> dict:
     party = await _require_party(session, party_id)
     return {
@@ -261,4 +299,5 @@ async def get_party_detail(session: AsyncSession, party_id: int) -> dict:
         "addresses": await list_addresses(session, party_id),
         "gst_registrations": await list_gst(session, party_id),
         "documents": await list_documents(session, party_id),
+        "tags": await list_party_tags(session, party_id),
     }
