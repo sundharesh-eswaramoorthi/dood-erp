@@ -12,6 +12,7 @@ import { PartiesPage } from "./features/parties/PartiesPage";
 import { PartyDetailPage } from "./features/parties/PartyDetailPage";
 import { ProductsPage } from "./features/products/ProductsPage";
 import { PurchasePage } from "./features/purchase/PurchasePage";
+import { ReportsPage } from "./features/reports/ReportsPage";
 import { SalesPage } from "./features/sales/SalesPage";
 import { SettingsPage } from "./features/settings/SettingsPage";
 import { StockPage } from "./features/stock/StockPage";
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/purchase" element={<PurchasePage />} />
               <Route path="/sales" element={<SalesPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
               <Route path="/transfers" element={<TransfersPage />} />
               <Route path="/units" element={<UnitsPage />} />
               <Route path="/settings" element={<SettingsPage />} />

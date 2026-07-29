@@ -11,6 +11,7 @@ from app.modules.health.router import router as health_router
 from app.modules.parties.router import router as parties_router
 from app.modules.products.router import router as products_router
 from app.modules.purchase.router import router as purchase_router
+from app.modules.reports.router import router as reports_router
 from app.modules.sales.router import router as sales_router
 from app.modules.settings.router import router as settings_router
 from app.modules.stock.router import router as stock_router
@@ -39,6 +40,7 @@ app.include_router(purchase_router, prefix="/api/v1/purchase", tags=["purchase"]
 app.include_router(sales_router, prefix="/api/v1/sales", tags=["sales"])
 app.include_router(accounts_router, prefix="/api/v1/accounts", tags=["accounts"])
 app.include_router(dashboard_router, prefix="/api/v1/dashboard", tags=["dashboard"])
+app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(settings_router, prefix="/api/v1", tags=["settings"])
 app.include_router(activity_router, prefix="/api/v1/activity", tags=["activity"])
 
