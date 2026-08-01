@@ -8,6 +8,7 @@ from app.modules.sales import service
 from app.modules.sales.schemas import (
     BillOrderIn,
     DeliveryCreate,
+    DirectBillCreate,
     DeliveryOut,
     SaleOrderCreate,
     SaleOrderOut,
@@ -156,6 +157,24 @@ async def bill_order(
         return await service.bill_order(session, principal, order_id, payload)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+    except (OverSell, CreditLimitExceeded) as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.post("/bills", response_model=SalesBillOut, status_code=status.HTTP_201_CREATED)
+async def create_direct_bill(
+    payload: DirectBillCreate,
+    principal: Principal = Depends(require_permission("sales.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """v2 §4 counter sale — an invoice with no order behind it. The bill moves
+    the stock itself, since nothing reserved or delivered it."""
+    try:
+        return await service.post_direct_bill(session, principal, payload)
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except (OverSell, CreditLimitExceeded) as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except ValueError as e:

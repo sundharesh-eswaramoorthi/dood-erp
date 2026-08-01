@@ -539,3 +539,113 @@ async def test_po_advance_moves_party_and_cash(ctx):
     assert await _party_net(s, org, party) == Decimal("300.00")
     assert await _account_balance(s, org, account) == Decimal("-300.00")
     assert await _account_balance(s, org, account) == await _account_ledger_net(s, org, account)
+
+
+# ---------------------------------------------------------------------------
+# v2 §4 counter sale (invoice with no order)
+# ---------------------------------------------------------------------------
+async def test_counter_sale_moves_stock_without_an_order(ctx):
+    """T18: a walk-in sale has no order, so nothing reserved or delivered the
+    goods — the bill is the sole mover. It must move the stock exactly once,
+    write no fulfilment (that tracks ORDERS), and post the receivable."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+
+    s, org, branch, g1, g2, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["godown2"],
+        ctx["product"], ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+
+    # stock into both godowns
+    for g in (g1, g2):
+        await eng.move_stock(s, org_id=org, branch_id=branch, godown_id=g, product_id=product,
+                             signed_qty=Decimal(50), movement_type="purchase", cost=Decimal(10),
+                             source=("seed", next(_ids), 1), effective_date=TODAY, created_by=1)
+        await eng.apply_cost_inbound(s, org, product, branch, Decimal(50), Decimal(10))
+    await s.commit()
+
+    bill = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party, paid_amount=Decimal(100), payment_account_id=account,
+        lines=[
+            DirectBillLineIn(product_id=product, godown_id=g1, entered_qty=Decimal(3),
+                             entered_unit_id=unit, rate=Decimal(100)),
+            DirectBillLineIn(product_id=product, godown_id=g2, entered_qty=Decimal(2),
+                             entered_unit_id=unit, rate=Decimal(150)),
+        ],
+    ))
+    await s.commit()
+
+    assert Decimal(bill["grand_total"]) == Decimal("600.00")
+    assert Decimal(bill["balance_amount"]) == Decimal("500.00")
+
+    # multi-godown: each line came out of its own godown
+    oh1, res1 = await _on_hand_and_reserved(s, org, product, branch, g1)
+    oh2, res2 = await _on_hand_and_reserved(s, org, product, branch, g2)
+    assert oh1 == Decimal(47) and oh2 == Decimal(48)
+    assert oh1 == await _ledger_sum(s, org, product, branch, g1)
+    assert oh2 == await _ledger_sum(s, org, product, branch, g2)
+    # a counter sale reserves nothing
+    assert res1 == 0 and res2 == 0
+
+    # no order, therefore no fulfilment rows
+    no_order = (await s.execute(text(
+        "SELECT sale_order_id FROM sales_bill WHERE id=:i"), {"i": bill["id"]})).scalar_one()
+    assert no_order is None
+    fulfil = (await s.execute(text(
+        "SELECT COUNT(*) FROM stock_fulfillment WHERE moved_by_doc_type='sales_bill' "
+        "AND moved_by_doc_id=:i"), {"i": bill["id"]})).scalar_one()
+    assert fulfil == 0
+
+    # receivable is the unpaid part; the cash arrived
+    assert await _party_net(s, org, party) == Decimal("500.00")
+    assert await _account_balance(s, org, account) == Decimal("100.00")
+    assert await _account_balance(s, org, account) == await _account_ledger_net(s, org, account)
+
+
+async def test_counter_sale_respects_the_oversell_guard(ctx):
+    """A counter sale must not be a way around the stock guard."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=5)
+
+    with pytest.raises(eng.OverSell):
+        await sales.post_direct_bill(s, prin, DirectBillCreate(
+            customer_id=party,
+            lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(99),
+                                    entered_unit_id=unit, rate=Decimal(10))],
+        ))
+    await s.rollback()
+
+
+async def test_sale_order_is_priced_like_its_bill(ctx):
+    """T19: v2 §4 — the order carries the same money block, so what the customer
+    is quoted is what the invoice charges."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import BillOrderIn, OrderLineIn, SaleOrderCreate
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx)
+
+    order = await sales.create_order(s, prin, SaleOrderCreate(
+        customer_id=party, discount_pct=Decimal(10), card_charges=Decimal(5),
+        lines=[OrderLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(4),
+                           entered_unit_id=unit, rate=Decimal(100), gst_rate=Decimal(5))],
+    ))
+    await s.commit()
+    # 400 gross - 10% = 360 taxable, 18 tax, 378 + 5 card = 383
+    assert Decimal(order["taxable_total"]) == Decimal("360.00")
+    assert Decimal(order["grand_total"]) == Decimal("383.00")
+
+    bill = await sales.bill_order(s, prin, order["id"], BillOrderIn(
+        discount_pct=Decimal(10), card_charges=Decimal(5)))
+    await s.commit()
+    assert Decimal(bill["grand_total"]) == Decimal(order["grand_total"])

@@ -550,10 +550,11 @@ async def list_bills(session: AsyncSession, principal: Principal, limit: int = 1
     rows = (
         await session.execute(
             text(
-                "SELECT id, doc_no, supplier_id, bill_date, grand_total, status "
-                "FROM purchase_bill ORDER BY id DESC LIMIT :lim"
+                "SELECT id, doc_no, supplier_id, bill_date, grand_total, paid_amount, "
+                "balance_amount, po_id, status FROM purchase_bill ORDER BY id DESC LIMIT :lim"
             ),
             {"lim": limit},
         )
     ).mappings().all()
-    return [dict(r) for r in rows]
+    m = ("grand_total", "paid_amount", "balance_amount")
+    return [{k: (str(v) if k in m and v is not None else v) for k, v in r.items()} for r in rows]

@@ -32,6 +32,7 @@ import { getCurrentStock, listGodowns } from "../stock/api";
 import {
   billOrder,
   cancelOrder,
+  createDirectBill,
   createOrder,
   deliverOrder,
   getOrder,
@@ -119,6 +120,52 @@ export function SalesPage() {
     },
   });
 
+  // v2 §4 counter sale: no order, the bill moves the stock itself
+  const [counter, setCounter] = useState({ customer: "", godown: "", product: "", qty: "", rate: "", gst: "" });
+  const [counterMoney, setCounterMoney] = useState<MoneyHeader>({ ...EMPTY_MONEY });
+  const counterPreview = useQuery({
+    queryKey: ["money-preview", counter, counterMoney],
+    queryFn: () =>
+      previewMoney(
+        [{ qty: counter.qty, rate: counter.rate, gst_rate: counter.gst }],
+        counterMoney,
+        "intra",
+      ),
+    enabled: !!(counter.product && counter.qty && counter.rate),
+  });
+  const directBill = useMutation({
+    mutationFn: () =>
+      createDirectBill({
+        customer_id: Number(counter.customer || f.customer),
+        supply_type: "intra",
+        ...moneyPayload(counterMoney),
+        lines: [{
+          product_id: Number(counter.product),
+          godown_id: Number(counter.godown || f.godown),
+          entered_qty: counter.qty,
+          entered_unit_id: baseUnitOf(Number(counter.product)),
+          rate: counter.rate,
+          gst_rate: counter.gst || undefined,
+        }],
+      }),
+    onSuccess: (b) => {
+      setMsg(
+        `Counter sale ${b.doc_no}: ₹${b.grand_total}` +
+          (Number(b.paid_amount ?? 0) ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}` : "") +
+          ". Stock moved by the bill (no order).",
+      );
+      setCounter({ ...counter, qty: "", rate: "" });
+      setCounterMoney({ ...EMPTY_MONEY });
+      qc.invalidateQueries({ queryKey: ["sales-bills"] });
+      qc.invalidateQueries({ queryKey: ["stock-current"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(typeof d === "string" ? d : "Counter sale failed");
+    },
+  });
+
   const bill = useMutation({
     mutationFn: (args: { id: number; money: Record<string, unknown>; supply: string }) =>
       billOrder(args.id, args.money, args.supply),
@@ -191,6 +238,61 @@ export function SalesPage() {
               <strong>available {avail.data.total_available}</strong>. Placing an order reserves stock (no movement yet).
             </Typography>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Counter sale <Typography component="span" variant="caption" color="text.secondary">(invoice without an order)</Typography>
+          </Typography>
+          <Box component="form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (counter.product && counter.qty && counter.rate) directBill.mutate();
+            }}>
+            <Stack spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                <TextField label="Customer" select value={counter.customer || f.customer}
+                  onChange={(e) => setCounter({ ...counter, customer: e.target.value })} sx={{ minWidth: 180 }}>
+                  {(parties.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>))}
+                </TextField>
+                <TextField label="Godown" select value={counter.godown || f.godown}
+                  onChange={(e) => setCounter({ ...counter, godown: e.target.value })} sx={{ width: 160 }}>
+                  {(godowns.data ?? []).map((g) => (<MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>))}
+                </TextField>
+                <TextField label="Product" select value={counter.product}
+                  onChange={(e) => {
+                    const p = products.data?.find((pp) => pp.id === Number(e.target.value));
+                    setCounter({ ...counter, product: e.target.value, gst: p?.gst_rate ?? "", rate: p?.sale_price ?? counter.rate });
+                    if (p?.price_inclusive) setCounterMoney((m) => ({ ...m, price_mode: "inclusive" }));
+                  }} sx={{ minWidth: 180 }}>
+                  {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
+                </TextField>
+                <TextField label="Qty" value={counter.qty}
+                  onChange={(e) => setCounter({ ...counter, qty: e.target.value })} sx={{ width: 100 }} />
+                <TextField label="Rate" value={counter.rate}
+                  onChange={(e) => setCounter({ ...counter, rate: e.target.value })} sx={{ width: 110 }} />
+                <TextField label="GST %" value={counter.gst}
+                  onChange={(e) => setCounter({ ...counter, gst: e.target.value })} sx={{ width: 95 }} />
+              </Stack>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
+                <Box sx={{ flex: 1 }}>
+                  <MoneyFields value={counterMoney} onChange={setCounterMoney} accounts={accounts.data ?? []} compact />
+                </Box>
+                <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1 }}>
+                  <MoneyTotalsPanel totals={counterPreview.data?.totals} />
+                  <Button type="submit" variant="contained" fullWidth sx={{ mt: 2 }}
+                    disabled={directBill.isPending || !counter.product || !counter.qty || !counter.rate}>
+                    Post counter sale
+                  </Button>
+                </Box>
+              </Stack>
+            </Stack>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            No order and no delivery, so the bill moves the stock itself — nothing is reserved.
+          </Typography>
         </CardContent>
       </Card>
 

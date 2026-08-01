@@ -12,7 +12,12 @@ from decimal import Decimal
 
 from app.core.deps import Principal
 from app.models.party import Party
-from app.modules.sales.schemas import DeliveryCreate, SaleOrderCreate, SalesReturnCreate
+from app.modules.sales.schemas import (
+    DeliveryCreate,
+    DirectBillCreate,
+    SaleOrderCreate,
+    SalesReturnCreate,
+)
 from app.services import credit, doc_money, money
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
@@ -37,13 +42,64 @@ async def get_order(session: AsyncSession, order_id: int) -> dict:
     ).mappings().one()
     lines = (
         await session.execute(
-            text("SELECT line_no, product_id, godown_id, entered_qty, entered_unit_id, base_qty, rate "
+            text("SELECT line_no, product_id, godown_id, entered_qty, entered_unit_id, base_qty, rate, "
+                 "hsn_code, remarks, gross_amount, discount_amount, header_discount_alloc, taxable, "
+                 "gst_rate, cgst, sgst, igst, line_total "
                  "FROM sale_order_line WHERE order_id=:i ORDER BY line_no"),
             {"i": order_id},
         )
     ).mappings().all()
-    return {"id": hdr["id"], "doc_no": hdr["doc_no"], "status": hdr["status"],
-            "customer_id": hdr["customer_id"], "lines": [dict(r) for r in lines]}
+    return {**dict(hdr), "lines": [dict(r) for r in lines]}
+
+
+async def _money_inputs(session: AsyncSession, lines) -> list[money.LineIn]:
+    out = []
+    for line in lines:
+        gst = (
+            Decimal(line.gst_rate)
+            if getattr(line, "gst_rate", None) is not None
+            else await _product_gst(session, line.product_id)
+        )
+        out.append(money.LineIn(
+            qty=Decimal(line.entered_qty), rate=Decimal(line.rate), gst_rate=gst,
+            discount_pct=Decimal(getattr(line, "discount_pct", 0) or 0),
+            discount_amount=getattr(line, "discount_amount", None),
+        ))
+    return out
+
+
+async def _post_receivable(
+    session: AsyncSession,
+    principal: Principal,
+    *,
+    bill_id: int,
+    branch: int,
+    customer_id: int,
+    totals: money.Totals,
+    cogs_total: Decimal,
+    bill_date,
+    payment_account_id: int | None,
+) -> None:
+    """The money tail every sales bill shares, whether it came from an order or
+    straight off the counter. Keeping it in one place is what stops the two
+    paths drifting the way purchase and sales did before v2."""
+    await doc_money.write_totals(session, "sales_bill", bill_id, totals)
+    await session.execute(
+        text("UPDATE sales_bill SET cogs_total=:c WHERE id=:i"), {"c": cogs_total, "i": bill_id}
+    )
+    # only the unpaid part is real credit exposure
+    await credit.check(session, principal.org_id, customer_id, totals.balance_amount)
+    await post_party_entry(
+        session, org_id=principal.org_id, branch_id=branch, party_id=customer_id,
+        entry_side="debit", amount=totals.grand_total, source=("sales_bill", bill_id, 0),
+        effective_date=bill_date, created_by=principal.user_id,
+    )
+    await doc_money.settle_at_post(
+        session, org_id=principal.org_id, branch_id=branch, party_id=customer_id,
+        account_id=payment_account_id, doc_type="sales_bill", doc_id=bill_id,
+        amount=totals.paid_amount, effective_date=bill_date, created_by=principal.user_id,
+        party_side="credit", account_direction="in",
+    )
 
 
 async def create_order(session: AsyncSession, principal: Principal, data: SaleOrderCreate) -> dict:
@@ -56,43 +112,74 @@ async def create_order(session: AsyncSession, principal: Principal, data: SaleOr
     if customer is None:
         raise ValueError("customer not found")
 
+    # The order is priced exactly like the bill it becomes (v2 §4).
+    computed = money.compute(
+        await _money_inputs(session, data.lines),
+        supply_type=data.supply_type, price_mode=data.price_mode,
+        header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
+        card_charges=data.card_charges, round_off=data.round_off,
+    )
+    t = computed.totals
+    order_date = data.order_date or dt.date.today()
+
     number = await allocate(session, principal.org_id, None, "sale_order")
     order_id = (
         await session.execute(
             text(
-                "INSERT INTO sale_order (org_id, branch_id, customer_id, doc_no, order_date, note, created_by) "
-                "VALUES (:o,:b,:c,:no,:od,:nt,:by) RETURNING id"
+                "INSERT INTO sale_order (org_id, branch_id, customer_id, doc_no, order_date, "
+                "doc_datetime, supply_type, price_mode, discount_pct, note, remarks, created_by) "
+                "VALUES (:o,:b,:c,:no,:od,COALESCE(:dts, now()),:st,:pm,:dp,:nt,:rm,:by) RETURNING id"
             ),
             {"o": principal.org_id, "b": branch_id, "c": data.customer_id, "no": number,
-             "od": data.order_date or dt.date.today(), "nt": data.note, "by": principal.user_id},
+             "od": order_date, "dts": data.doc_datetime, "st": data.supply_type,
+             "pm": data.price_mode, "dp": data.discount_pct, "nt": data.note,
+             "rm": data.remarks, "by": principal.user_id},
         )
     ).scalar_one()
 
-    order_value = Decimal(0)
-    for i, line in enumerate(data.lines, start=1):
+    for i, (line, m) in enumerate(zip(data.lines, computed.lines), start=1):
+        godown_id = await doc_money.resolve_godown(session, branch_id, line.godown_id, None)
         base = await eng.to_base(session, line.product_id, line.entered_qty, line.entered_unit_id)
+        hsn = line.hsn_code or await doc_money.product_hsn(session, line.product_id)
         await session.execute(
             text(
                 "INSERT INTO sale_order_line (org_id, order_id, line_no, product_id, godown_id, "
-                "entered_qty, entered_unit_id, base_qty, rate) VALUES (:o,:ord,:ln,:p,:g,:eq,:eu,:bq,:rt)"
+                "entered_qty, entered_unit_id, base_qty, rate, hsn_code, remarks, gross_amount, "
+                "discount_pct, discount_amount, header_discount_alloc, taxable, gst_rate, "
+                "cgst, sgst, igst, line_total) "
+                "VALUES (:o,:ord,:ln,:p,:g,:eq,:eu,:bq,:rt,:hsn,:rm,:gross,:dpct,:damt,:halloc,"
+                ":tx,:gr,:cg,:sg,:ig,:lt)"
             ),
-            {"o": principal.org_id, "ord": order_id, "ln": i, "p": line.product_id, "g": line.godown_id,
-             "eq": line.entered_qty, "eu": line.entered_unit_id, "bq": base, "rt": line.rate},
+            {"o": principal.org_id, "ord": order_id, "ln": i, "p": line.product_id, "g": godown_id,
+             "eq": line.entered_qty, "eu": line.entered_unit_id, "bq": base, "rt": line.rate,
+             "hsn": hsn, "rm": line.remarks, "gross": m.gross, "dpct": line.discount_pct or 0,
+             "damt": m.discount, "halloc": m.header_discount_alloc, "tx": m.taxable,
+             "gr": m.gst_rate, "cg": m.cgst, "sg": m.sgst, "ig": m.igst, "lt": m.line_total},
         )
-        # rate is per ENTERED unit (same convention as purchase, and as the bill)
-        order_value += (Decimal(line.entered_qty) * Decimal(line.rate)).quantize(Q2)
         allow_neg = await eng.product_allows_negative(session, line.product_id)
         await eng.reserve_stock(
-            session, org_id=principal.org_id, branch_id=branch_id, godown_id=line.godown_id,
+            session, org_id=principal.org_id, branch_id=branch_id, godown_id=godown_id,
             product_id=line.product_id, qty=base, order_id=order_id, order_line_no=i, allow_negative=allow_neg,
         )
 
-    # v2 §1 credit limit — advisory gate at order time (ex-tax value); the bill
-    # re-checks on the exact grand total. Raising here rolls the whole txn back,
-    # so the reservations above are undone with it.
-    await credit.check(session, principal.org_id, data.customer_id, order_value)
+    await session.execute(
+        text(
+            "UPDATE sale_order SET gross_total=:gr, line_discount_total=:ld, discount_amount=:hd, "
+            "taxable_total=:tx, tax_total=:tax, card_charges=:cc, round_off=:ro, grand_total=:gt "
+            "WHERE id=:i"
+        ),
+        {"gr": t.gross_total, "ld": t.line_discount_total, "hd": t.header_discount,
+         "tx": t.taxable_total, "tax": t.tax_total, "cc": t.card_charges, "ro": t.round_off,
+         "gt": t.grand_total, "i": order_id},
+    )
 
-    await emit(session, principal.org_id, "sale.order", {"order_id": order_id, "customer_id": data.customer_id})
+    # v2 §1 credit limit — advisory gate at order time on the real order value;
+    # the bill re-checks. Raising here rolls the whole txn back, so the
+    # reservations above are undone with it.
+    await credit.check(session, principal.org_id, data.customer_id, t.grand_total)
+
+    await emit(session, principal.org_id, "sale.order",
+               {"order_id": order_id, "customer_id": data.customer_id, "grand_total": str(t.grand_total)})
     return await get_order(session, order_id)
 
 
@@ -336,7 +423,14 @@ async def bill_order(
     session: AsyncSession, principal: Principal, order_id: int, opts: "BillOrderIn | None" = None
 ) -> dict:
     """Bill a sale order. The order supplies the lines (each with its own
-    godown, hence multi-godown invoices); `opts` supplies the v2 money block.
+    godown, hence multi-godown invoices) AND its agreed prices; `opts` may
+    override the header money block.
+
+    What the order quoted is what the invoice charges: line GST and discounts
+    come off the order line, and any header money field the caller did not
+    explicitly set falls back to the order's. Re-deriving GST from the product
+    instead would silently re-price an order whenever the product master
+    changed after it was taken.
 
     Stock rule is unchanged (decision #5): the bill moves only what a delivery
     has not already moved.
@@ -344,6 +438,7 @@ async def bill_order(
     from app.modules.sales.schemas import BillOrderIn  # local: avoids a cycle
 
     opts = opts or BillOrderIn()
+    sent = opts.model_fields_set
     order = (await session.execute(text("SELECT * FROM sale_order WHERE id=:i"), {"i": order_id})).mappings().one_or_none()
     if order is None:
         raise LookupError("Order not found")
@@ -354,24 +449,37 @@ async def bill_order(
 
     lines = (
         await session.execute(
-            text("SELECT line_no, product_id, godown_id, entered_qty, entered_unit_id, base_qty, rate "
+            text("SELECT line_no, product_id, godown_id, entered_qty, entered_unit_id, base_qty, rate, "
+                 "gst_rate, discount_pct, discount_amount "
                  "FROM sale_order_line WHERE order_id=:i ORDER BY line_no"),
             {"i": order_id},
         )
     ).mappings().all()
 
+    # the order's own figures, unless the caller deliberately overrode them
+    supply_type = opts.supply_type if "supply_type" in sent else order["supply_type"]
+    price_mode = opts.price_mode if "price_mode" in sent else order["price_mode"]
+    header_pct = opts.discount_pct if "discount_pct" in sent else Decimal(order["discount_pct"])
+    header_amt = (
+        opts.discount_amount if "discount_amount" in sent
+        else (Decimal(order["discount_amount"]) or None) or None
+    )
+    card = opts.card_charges if "card_charges" in sent else Decimal(order["card_charges"])
+
     money_lines = [
         money.LineIn(
             qty=Decimal(l["entered_qty"]), rate=Decimal(l["rate"]),
-            gst_rate=await _product_gst(session, l["product_id"]),
+            gst_rate=Decimal(l["gst_rate"]),
+            discount_pct=Decimal(l["discount_pct"] or 0),
+            discount_amount=Decimal(l["discount_amount"]) if l["discount_amount"] else None,
         )
         for l in lines
     ]
     computed = money.compute(
         money_lines,
-        supply_type=opts.supply_type, price_mode=opts.price_mode,
-        header_discount_pct=opts.discount_pct, header_discount_amount=opts.discount_amount,
-        card_charges=opts.card_charges, round_off=opts.round_off, paid_amount=opts.paid_amount,
+        supply_type=supply_type, price_mode=price_mode,
+        header_discount_pct=header_pct, header_discount_amount=header_amt,
+        card_charges=card, round_off=opts.round_off, paid_amount=opts.paid_amount,
     )
     t = computed.totals
 
@@ -382,8 +490,8 @@ async def bill_order(
                  "price_mode, bill_date, doc_datetime, discount_pct, remarks, payment_account_id, created_by) "
                  "VALUES (:o,:b,:c,:so,:no,:st,:pm,:bd,COALESCE(:dts, now()),:dp,:rm,:pa,:by) RETURNING id"),
             {"o": principal.org_id, "b": branch, "c": order["customer_id"], "so": order_id, "no": number,
-             "st": opts.supply_type, "pm": opts.price_mode, "bd": bill_date, "dts": opts.doc_datetime,
-             "dp": opts.discount_pct, "rm": opts.remarks, "pa": opts.payment_account_id,
+             "st": supply_type, "pm": price_mode, "bd": bill_date, "dts": opts.doc_datetime,
+             "dp": header_pct, "rm": opts.remarks, "pa": opts.payment_account_id,
              "by": principal.user_id},
         )
     ).scalar_one()
@@ -440,21 +548,10 @@ async def bill_order(
                     "gst_rate": m.gst_rate, "cgst": m.cgst, "sgst": m.sgst, "igst": m.igst,
                     "cogs_amount": cogs, "line_total": m.line_total})
 
-    await doc_money.write_totals(session, "sales_bill", bill_id, t)
-    await session.execute(text("UPDATE sales_bill SET cogs_total=:c WHERE id=:i"),
-                          {"c": cogs_total, "i": bill_id})
-    # Exact credit check on the real invoice value, before the receivable posts.
-    # Only the unpaid part actually becomes exposure.
-    await credit.check(session, principal.org_id, order["customer_id"], t.balance_amount)
-    await post_party_entry(session, org_id=principal.org_id, branch_id=branch, party_id=order["customer_id"],
-                           entry_side="debit", amount=t.grand_total, source=("sales_bill", bill_id, 0),
-                           effective_date=bill_date, created_by=principal.user_id)
-    # cash taken at the counter settles the receivable immediately
-    await doc_money.settle_at_post(
-        session, org_id=principal.org_id, branch_id=branch, party_id=order["customer_id"],
-        account_id=opts.payment_account_id, doc_type="sales_bill", doc_id=bill_id,
-        amount=t.paid_amount, effective_date=bill_date, created_by=principal.user_id,
-        party_side="credit", account_direction="in",
+    await _post_receivable(
+        session, principal, bill_id=bill_id, branch=branch, customer_id=order["customer_id"],
+        totals=t, cogs_total=cogs_total, bill_date=bill_date,
+        payment_account_id=opts.payment_account_id,
     )
     # order fully fulfilled now?
     undelivered = (
@@ -472,14 +569,113 @@ async def bill_order(
     return await get_bill(session, bill_id)
 
 
+async def post_direct_bill(
+    session: AsyncSession, principal: Principal, data: "DirectBillCreate"
+) -> dict:
+    """v2 §4: a sale invoice with no order behind it (counter / walk-in sale).
+
+    With no order there is no reservation to consume and no delivery, so the
+    bill is the sole mover — the same rule decision #5 already applies when a
+    bill runs ahead of its delivery. Nothing is written to stock_fulfillment
+    either: that table tracks how much of an ORDER has been satisfied, and there
+    is no order here.
+    """
+    branch = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
+    if branch is None:
+        raise ValueError("Caller has no branch access")
+    if branch not in principal.branch_ids:
+        raise PermissionError("Branch not permitted")
+    customer = (await session.execute(select(Party).where(Party.id == data.customer_id))).scalar_one_or_none()
+    if customer is None:
+        raise ValueError("customer not found")
+
+    bill_date = data.bill_date or dt.date.today()
+    computed = money.compute(
+        await _money_inputs(session, data.lines),
+        supply_type=data.supply_type, price_mode=data.price_mode,
+        header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
+        card_charges=data.card_charges, round_off=data.round_off, paid_amount=data.paid_amount,
+    )
+    t = computed.totals
+
+    number = await allocate(session, principal.org_id, None, "sales_bill")
+    bill_id = (
+        await session.execute(
+            text("INSERT INTO sales_bill (org_id, branch_id, customer_id, sale_order_id, doc_no, "
+                 "supply_type, price_mode, bill_date, doc_datetime, discount_pct, remarks, "
+                 "payment_account_id, created_by) "
+                 "VALUES (:o,:b,:c,NULL,:no,:st,:pm,:bd,COALESCE(:dts, now()),:dp,:rm,:pa,:by) RETURNING id"),
+            {"o": principal.org_id, "b": branch, "c": data.customer_id, "no": number,
+             "st": data.supply_type, "pm": data.price_mode, "bd": bill_date,
+             "dts": data.doc_datetime, "dp": data.discount_pct, "rm": data.remarks,
+             "pa": data.payment_account_id, "by": principal.user_id},
+        )
+    ).scalar_one()
+
+    cogs_total = Decimal(0)
+    out = []
+    for i, (line, m) in enumerate(zip(data.lines, computed.lines), start=1):
+        godown_id = await doc_money.resolve_godown(session, branch, line.godown_id, None)
+        base = await eng.to_base(session, line.product_id, line.entered_qty, line.entered_unit_id)
+        hsn = line.hsn_code or await doc_money.product_hsn(session, line.product_id)
+        cost = await eng.current_wac(session, principal.org_id, line.product_id, branch)
+        allow_neg = await eng.product_allows_negative(session, line.product_id)
+
+        # the bill IS the mover here
+        await eng.move_stock(
+            session, org_id=principal.org_id, branch_id=branch, godown_id=godown_id,
+            product_id=line.product_id, signed_qty=-base, movement_type="sale", cost=cost,
+            source=("sales_bill", bill_id, i), effective_date=bill_date,
+            created_by=principal.user_id, allow_negative=allow_neg,
+        )
+        await eng.apply_cost_outbound(session, principal.org_id, line.product_id, branch, base)
+        cogs = (cost * base).quantize(Q2)
+
+        await session.execute(
+            text("INSERT INTO sales_bill_line (org_id, bill_id, line_no, product_id, godown_id, "
+                 "entered_qty, entered_unit_id, base_qty, moved_qty, rate, hsn_code, remarks, "
+                 "gross_amount, discount_pct, discount_amount, header_discount_alloc, taxable, "
+                 "gst_rate, cgst, sgst, igst, cogs_amount, line_total) "
+                 "VALUES (:o,:bid,:ln,:p,:g,:eq,:eu,:bq,:mv,:rt,:hsn,:rm,:gross,:dpct,:damt,:halloc,"
+                 ":tx,:gr,:cg,:sg,:ig,:cogs,:lt)"),
+            {"o": principal.org_id, "bid": bill_id, "ln": i, "p": line.product_id, "g": godown_id,
+             "eq": line.entered_qty, "eu": line.entered_unit_id, "bq": base, "mv": base,
+             "rt": line.rate, "hsn": hsn, "rm": line.remarks, "gross": m.gross,
+             "dpct": line.discount_pct or 0, "damt": m.discount,
+             "halloc": m.header_discount_alloc, "tx": m.taxable, "gr": m.gst_rate,
+             "cg": m.cgst, "sg": m.sgst, "ig": m.igst, "cogs": cogs, "lt": m.line_total},
+        )
+        cogs_total += cogs
+        out.append({"line_no": i, "product_id": line.product_id, "godown_id": godown_id,
+                    "entered_qty": line.entered_qty, "entered_unit_id": line.entered_unit_id,
+                    "base_qty": base, "moved_qty": base, "rate": line.rate, "hsn_code": hsn,
+                    "remarks": line.remarks, "gross_amount": m.gross,
+                    "discount_amount": m.discount, "header_discount_alloc": m.header_discount_alloc,
+                    "taxable": m.taxable, "gst_rate": m.gst_rate, "cgst": m.cgst, "sgst": m.sgst,
+                    "igst": m.igst, "cogs_amount": cogs, "line_total": m.line_total})
+
+    await _post_receivable(
+        session, principal, bill_id=bill_id, branch=branch, customer_id=data.customer_id,
+        totals=t, cogs_total=cogs_total, bill_date=bill_date,
+        payment_account_id=data.payment_account_id,
+    )
+    await emit(session, principal.org_id, "sale.bill",
+               {"bill_id": bill_id, "order_id": None, "counter_sale": True,
+                "grand_total": str(t.grand_total)})
+    return await get_bill(session, bill_id)
+
+
 async def list_bills(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
     rows = (
         await session.execute(
-            text("SELECT id, doc_no, customer_id, sale_order_id, grand_total, status FROM sales_bill ORDER BY id DESC LIMIT :l"),
+            text("SELECT id, doc_no, customer_id, sale_order_id, grand_total, paid_amount, "
+                 "balance_amount, bill_date, status FROM sales_bill ORDER BY id DESC LIMIT :l"),
             {"l": limit},
         )
     ).mappings().all()
-    return [dict(r) for r in rows]
+    # money as decimal strings, like the documents themselves
+    m = ("grand_total", "paid_amount", "balance_amount")
+    return [{k: (str(v) if k in m and v is not None else v) for k, v in r.items()} for r in rows]
 
 
 async def post_sales_return(session: AsyncSession, principal: Principal, data: SalesReturnCreate) -> dict:
