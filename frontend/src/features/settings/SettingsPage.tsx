@@ -1,4 +1,5 @@
 import {
+  Alert,
   Box,
   Button,
   Card,
@@ -6,6 +7,7 @@ import {
   Chip,
   Divider,
   FormControlLabel,
+  MenuItem,
   Stack,
   Switch,
   Table,
@@ -20,24 +22,116 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import {
+  createBranch,
+  createDocumentType,
+  createGodown,
   createTag,
   createTaxRate,
   getFeatureFlags,
+  listBranchesAdmin,
+  listDocumentTypes,
+  listGodownsAdmin,
   listTags,
   listTaxRates,
   setFeatureFlag,
+  updateBranch,
+  updateDocumentType,
+  updateGodown,
+  type Branch,
+  type DocumentType,
+  type GodownAdmin,
   type Tag,
   type TaxRate,
 } from "./api";
+
+const EMPTY_BRANCH = { name: "", code: "", address: "", phone: "", gstin: "", state_code: "" };
+const EMPTY_GODOWN = { name: "", branch_id: "", code: "" };
 
 export function SettingsPage() {
   const qc = useQueryClient();
   const [tax, setTax] = useState({ name: "", rate: "" });
   const [tag, setTag] = useState({ name: "", color: "#B96D28" });
 
+  const [branchForm, setBranchForm] = useState(EMPTY_BRANCH);
+  const [godownForm, setGodownForm] = useState(EMPTY_GODOWN);
+  const [docType, setDocType] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+
   const taxRates = useQuery({ queryKey: ["tax-rates"], queryFn: listTaxRates });
   const tags = useQuery({ queryKey: ["tags"], queryFn: listTags });
   const flags = useQuery({ queryKey: ["feature-flags"], queryFn: getFeatureFlags });
+  const branches = useQuery({ queryKey: ["branches-admin"], queryFn: () => listBranchesAdmin() });
+  const godowns = useQuery({ queryKey: ["godowns-admin"], queryFn: listGodownsAdmin });
+  const docTypes = useQuery({
+    queryKey: ["document-types", "all"],
+    queryFn: () => listDocumentTypes("party", true),
+  });
+
+  const fail = (e: unknown) => {
+    const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+    setErr(typeof d === "string" ? d : "Action failed");
+  };
+  const refetchOrg = () => {
+    setErr(null);
+    qc.invalidateQueries({ queryKey: ["branches-admin"] });
+    qc.invalidateQueries({ queryKey: ["godowns-admin"] });
+    qc.invalidateQueries({ queryKey: ["branches"] });
+    qc.invalidateQueries({ queryKey: ["godowns"] });
+  };
+
+  const addBranch = useMutation({
+    mutationFn: () =>
+      createBranch({
+        name: branchForm.name,
+        code: branchForm.code || null,
+        address: branchForm.address || null,
+        phone: branchForm.phone || null,
+        gstin: branchForm.gstin || null,
+        state_code: branchForm.state_code || null,
+      }),
+    onSuccess: () => {
+      setBranchForm(EMPTY_BRANCH);
+      refetchOrg();
+    },
+    onError: fail,
+  });
+  const toggleBranch = useMutation({
+    mutationFn: (b: Branch) => updateBranch(b.id, { is_active: !b.is_active }),
+    onSuccess: refetchOrg,
+    onError: fail,
+  });
+  const addGodown = useMutation({
+    mutationFn: () =>
+      createGodown({
+        name: godownForm.name,
+        branch_id: Number(godownForm.branch_id),
+        code: godownForm.code || null,
+      }),
+    onSuccess: () => {
+      setGodownForm(EMPTY_GODOWN);
+      refetchOrg();
+    },
+    onError: fail,
+  });
+  const toggleGodown = useMutation({
+    mutationFn: (g: GodownAdmin) => updateGodown(g.id, { is_active: !g.is_active }),
+    onSuccess: refetchOrg,
+    onError: fail,
+  });
+  const addDocType = useMutation({
+    mutationFn: () => createDocumentType({ name: docType, applies_to: "party" }),
+    onSuccess: () => {
+      setDocType("");
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["document-types"] });
+    },
+    onError: fail,
+  });
+  const toggleDocType = useMutation({
+    mutationFn: (d: DocumentType) => updateDocumentType(d.id, { is_active: !d.is_active }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["document-types"] }),
+    onError: fail,
+  });
 
   const addTax = useMutation({
     mutationFn: () => createTaxRate({ name: tax.name, rate: tax.rate }),
@@ -63,6 +157,152 @@ export function SettingsPage() {
       <Typography variant="h4" fontWeight={800}>
         Settings
       </Typography>
+      {err && <Alert severity="error" onClose={() => setErr(null)}>{err}</Alert>}
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Branches</Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Code</TableCell>
+                <TableCell>GSTIN</TableCell>
+                <TableCell>Address</TableCell>
+                <TableCell>Phone</TableCell>
+                <TableCell align="right">Status</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(branches.data ?? []).map((b) => (
+                <TableRow key={b.id} sx={{ opacity: b.is_active ? 1 : 0.5 }}>
+                  <TableCell>{b.name}</TableCell>
+                  <TableCell><code>{b.code || "-"}</code></TableCell>
+                  <TableCell>{b.gstin || "-"}</TableCell>
+                  <TableCell>{b.address || "-"}</TableCell>
+                  <TableCell>{b.phone || "-"}</TableCell>
+                  <TableCell align="right">
+                    <FormControlLabel
+                      control={<Switch size="small" checked={b.is_active}
+                        onChange={() => toggleBranch.mutate(b)} />}
+                      label={b.is_active ? "Active" : "Inactive"}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Box component="form" sx={{ mt: 2 }}
+            onSubmit={(e) => { e.preventDefault(); if (branchForm.name) addBranch.mutate(); }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1} flexWrap="wrap" useFlexGap>
+              <TextField size="small" label="Name" required value={branchForm.name}
+                onChange={(e) => setBranchForm({ ...branchForm, name: e.target.value })} sx={{ minWidth: 170 }} />
+              <TextField size="small" label="Code" value={branchForm.code}
+                onChange={(e) => setBranchForm({ ...branchForm, code: e.target.value })} sx={{ width: 110 }} />
+              <TextField size="small" label="GSTIN" value={branchForm.gstin}
+                onChange={(e) => setBranchForm({ ...branchForm, gstin: e.target.value.toUpperCase() })} sx={{ width: 190 }} />
+              <TextField size="small" label="State code" value={branchForm.state_code}
+                onChange={(e) => setBranchForm({ ...branchForm, state_code: e.target.value })} sx={{ width: 110 }} />
+              <TextField size="small" label="Address" value={branchForm.address}
+                onChange={(e) => setBranchForm({ ...branchForm, address: e.target.value })} sx={{ flex: 1, minWidth: 200 }} />
+              <TextField size="small" label="Phone" value={branchForm.phone}
+                onChange={(e) => setBranchForm({ ...branchForm, phone: e.target.value })} sx={{ width: 150 }} />
+              <Button type="submit" variant="contained" disabled={addBranch.isPending || !branchForm.name}>
+                Add branch
+              </Button>
+            </Stack>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            GSTIN, address and state code print on this branch's invoices.
+          </Typography>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Godowns</Typography>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Name</TableCell>
+                <TableCell>Code</TableCell>
+                <TableCell>Branch</TableCell>
+                <TableCell align="right">Status</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {(godowns.data ?? []).map((g) => (
+                <TableRow key={g.id} sx={{ opacity: g.is_active ? 1 : 0.5 }}>
+                  <TableCell>{g.name}</TableCell>
+                  <TableCell><code>{g.code || "-"}</code></TableCell>
+                  <TableCell>
+                    {(branches.data ?? []).find((b) => b.id === g.branch_id)?.name ?? g.branch_id}
+                  </TableCell>
+                  <TableCell align="right">
+                    <FormControlLabel
+                      control={<Switch size="small" checked={g.is_active}
+                        onChange={() => toggleGodown.mutate(g)} />}
+                      label={g.is_active ? "Active" : "Inactive"}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <Box component="form" sx={{ mt: 2 }}
+            onSubmit={(e) => { e.preventDefault(); if (godownForm.name && godownForm.branch_id) addGodown.mutate(); }}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <TextField size="small" label="Name" required value={godownForm.name}
+                onChange={(e) => setGodownForm({ ...godownForm, name: e.target.value })} sx={{ minWidth: 180 }} />
+              <TextField size="small" label="Code" value={godownForm.code}
+                onChange={(e) => setGodownForm({ ...godownForm, code: e.target.value })} sx={{ width: 120 }} />
+              <TextField size="small" label="Branch" select required value={godownForm.branch_id}
+                onChange={(e) => setGodownForm({ ...godownForm, branch_id: e.target.value })} sx={{ minWidth: 170 }}>
+                {(branches.data ?? []).filter((b) => b.is_active).map((b) => (
+                  <MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>
+                ))}
+              </TextField>
+              <Button type="submit" variant="contained"
+                disabled={addGodown.isPending || !godownForm.name || !godownForm.branch_id}>
+                Add godown
+              </Button>
+            </Stack>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            A godown holding stock cannot be deactivated or moved to another branch.
+          </Typography>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Party document types</Typography>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+            {(docTypes.data ?? []).map((d) => (
+              <Chip
+                key={d.id}
+                label={d.name}
+                variant={d.is_active ? "filled" : "outlined"}
+                color={d.is_active ? "default" : "warning"}
+                onClick={() => toggleDocType.mutate(d)}
+              />
+            ))}
+          </Stack>
+          <Box component="form"
+            onSubmit={(e) => { e.preventDefault(); if (docType) addDocType.mutate(); }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TextField size="small" label="New document type" value={docType}
+                onChange={(e) => setDocType(e.target.value)} />
+              <Button type="submit" variant="outlined" disabled={addDocType.isPending || !docType}>
+                Add
+              </Button>
+            </Stack>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            These fill the document dropdown on a party. Click a chip to activate/deactivate it.
+          </Typography>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardContent>

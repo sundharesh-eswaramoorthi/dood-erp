@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { listTags } from "../settings/api";
+import { listDocumentTypes, listTags } from "../settings/api";
 import {
   addAddress,
   addContact,
@@ -43,6 +43,8 @@ export function PartyDetailPage() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["party", partyId] });
   const allTags = useQuery({ queryKey: ["tags"], queryFn: listTags });
+  // v2 §9: the type list is a settings master now, not a hard-coded dropdown
+  const docTypes = useQuery({ queryKey: ["document-types"], queryFn: () => listDocumentTypes("party") });
   const mAddTag = useMutation({ mutationFn: (tid: number) => addTag(partyId, tid), onSuccess: invalidate });
   const mRemoveTag = useMutation({ mutationFn: (tid: number) => removeTag(partyId, tid), onSuccess: invalidate });
   const mDoc = useMutation({
@@ -332,10 +334,11 @@ export function PartyDetailPage() {
           >
             <Stack direction="row" spacing={1} sx={{ mt: 2 }} alignItems="center" flexWrap="wrap" useFlexGap>
               <TextField size="small" select label="Type" value={doc.doc_type} onChange={(e) => setDoc({ ...doc, doc_type: e.target.value })} sx={{ width: 190 }}>
-                <MenuItem value="GST Certificate">GST Certificate</MenuItem>
-                <MenuItem value="KYC">KYC</MenuItem>
-                <MenuItem value="PAN Card">PAN Card</MenuItem>
-                <MenuItem value="Other">Other</MenuItem>
+                {(docTypes.data ?? []).map((d) => (
+                  <MenuItem key={d.id} value={d.name}>
+                    {d.name}{d.is_required ? " *" : ""}
+                  </MenuItem>
+                ))}
               </TextField>
               <TextField size="small" label="File name" value={doc.file_name} onChange={(e) => setDoc({ ...doc, file_name: e.target.value })} />
               <Button type="submit" variant="contained" disabled={mDoc.isPending}>Add document</Button>
