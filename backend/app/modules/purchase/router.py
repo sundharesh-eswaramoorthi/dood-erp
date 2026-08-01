@@ -3,7 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import Principal, get_scoped_session, require_permission
+from app.core.deps import (
+    Principal,
+    assert_can_edit_dated,
+    get_scoped_session,
+    require_permission,
+)
 from app.modules.purchase import service
 from app.modules.purchase.schemas import (
     PurchaseBillCreate,
@@ -35,7 +40,7 @@ async def create_bill(
 
 @router.get("/bills")
 async def list_bills(
-    principal: Principal = Depends(require_permission("purchase.create")),
+    principal: Principal = Depends(require_permission("purchase.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_bills(session, principal)
@@ -62,7 +67,7 @@ async def create_return(
 @router.post("/orders", response_model=PurchaseOrderOut, status_code=status.HTTP_201_CREATED)
 async def create_order(
     payload: PurchaseOrderCreate,
-    principal: Principal = Depends(require_permission("purchase.create")),
+    principal: Principal = Depends(require_permission("purchase.order")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -75,7 +80,7 @@ async def create_order(
 
 @router.get("/orders")
 async def list_orders(
-    principal: Principal = Depends(require_permission("purchase.create")),
+    principal: Principal = Depends(require_permission("purchase.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_po(session, principal)
@@ -84,7 +89,7 @@ async def list_orders(
 @router.get("/orders/{po_id}", response_model=PurchaseOrderOut)
 async def get_order(
     po_id: int,
-    principal: Principal = Depends(require_permission("purchase.create")),
+    principal: Principal = Depends(require_permission("purchase.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -118,7 +123,7 @@ async def receive_order(
 @router.post("/orders/{po_id}/cancel", response_model=PurchaseOrderOut)
 async def cancel_order(
     po_id: int,
-    principal: Principal = Depends(require_permission("purchase.create")),
+    principal: Principal = Depends(require_permission("purchase.order")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -132,10 +137,54 @@ async def cancel_order(
 @router.get("/bills/{bill_id}/payments")
 async def bill_payments(
     bill_id: int,
-    principal: Principal = Depends(require_permission("purchase.create")),
+    principal: Principal = Depends(require_permission("purchase.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     """v2 §3 "Payment history" — what has settled this bill, and what is left."""
     from app.services import allocation as alloc
 
     return await alloc.document_payments(session, principal.org_id, "purchase_bill", bill_id)
+
+
+# ---- amendment (v2 §7 "edit current / previous date invoice") ----
+@router.post("/bills/{bill_id}/cancel")
+async def cancel_bill(
+    bill_id: int,
+    reason: str | None = None,
+    principal: Principal = Depends(require_permission("invoice.cancel")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    from app.services import reversal
+
+    try:
+        doc = await reversal.load_document(session, "purchase_bill", bill_id)
+        assert_can_edit_dated(principal, doc["bill_date"])
+        return await service.cancel_bill(session, principal, bill_id, reason)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bill not found")
+    except reversal.NotReversible as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+
+
+@router.put("/bills/{bill_id}", response_model=PurchaseBillOut)
+async def amend_bill(
+    bill_id: int,
+    payload: PurchaseBillCreate,
+    reason: str | None = None,
+    principal: Principal = Depends(require_permission("purchase.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    from app.services import reversal
+
+    try:
+        doc = await reversal.load_document(session, "purchase_bill", bill_id)
+        assert_can_edit_dated(principal, doc["bill_date"])
+        return await service.amend_bill(session, principal, bill_id, payload, reason)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bill not found")
+    except reversal.NotReversible as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except service.eng.OverSell as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

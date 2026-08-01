@@ -3,7 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import Principal, get_scoped_session, require_permission
+from app.core.deps import (
+    Principal,
+    assert_can_edit_dated,
+    get_scoped_session,
+    require_permission,
+)
 from app.modules.sales import service
 from app.modules.sales.schemas import (
     BillOrderIn,
@@ -40,7 +45,7 @@ async def create_order(
 
 @router.get("/orders")
 async def list_orders(
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_orders(session, principal)
@@ -49,7 +54,7 @@ async def list_orders(
 @router.get("/orders/{order_id}", response_model=SaleOrderOut)
 async def get_order(
     order_id: int,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -75,7 +80,7 @@ async def cancel_order(
 @router.post("/orders/{order_id}/deliver", response_model=DeliveryOut, status_code=201)
 async def deliver_full(
     order_id: int,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("delivery.update")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -94,7 +99,7 @@ async def deliver_full(
 @router.post("/deliveries", response_model=DeliveryOut, status_code=201)
 async def create_delivery(
     payload: DeliveryCreate,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("delivery.update")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -108,7 +113,7 @@ async def create_delivery(
 @router.post("/deliveries/{delivery_id}/dispatch", response_model=DeliveryOut)
 async def dispatch_delivery(
     delivery_id: int,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("delivery.update")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -126,7 +131,7 @@ async def dispatch_delivery(
 @router.post("/deliveries/{delivery_id}/complete", response_model=DeliveryOut)
 async def complete_delivery(
     delivery_id: int,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("delivery.update")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -139,7 +144,7 @@ async def complete_delivery(
 
 @router.get("/deliveries")
 async def list_deliveries(
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("delivery.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_deliveries(session, principal)
@@ -183,7 +188,7 @@ async def create_direct_bill(
 
 @router.get("/bills")
 async def list_bills(
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_bills(session, principal)
@@ -192,7 +197,7 @@ async def list_bills(
 @router.post("/returns", response_model=SalesReturnOut, status_code=201)
 async def create_return(
     payload: SalesReturnCreate,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("sales.return")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -208,10 +213,58 @@ async def create_return(
 @router.get("/bills/{bill_id}/payments")
 async def bill_payments(
     bill_id: int,
-    principal: Principal = Depends(require_permission("sales.create")),
+    principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     """v2 §3 "Payment history" — what has settled this invoice, and what is left."""
     from app.services import allocation as alloc
 
     return await alloc.document_payments(session, principal.org_id, "sales_bill", bill_id)
+
+
+# ---- amendment (v2 §7 "edit current / previous date invoice") ----
+@router.post("/bills/{bill_id}/cancel")
+async def cancel_bill(
+    bill_id: int,
+    reason: str | None = None,
+    principal: Principal = Depends(require_permission("invoice.cancel")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """Void a posted invoice. Nothing is edited: the document's stock and ledger
+    effects are negated by reversing entries and it is marked cancelled."""
+    from app.services import reversal
+
+    try:
+        doc = await reversal.load_document(session, "sales_bill", bill_id)
+        assert_can_edit_dated(principal, doc["bill_date"])
+        return await service.cancel_bill(session, principal, bill_id, reason)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bill not found")
+    except reversal.NotReversible as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+
+
+@router.put("/bills/{bill_id}", response_model=SalesBillOut)
+async def amend_bill(
+    bill_id: int,
+    payload: DirectBillCreate,
+    reason: str | None = None,
+    principal: Principal = Depends(require_permission("sales.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """Correct a posted invoice: the original is reversed and superseded by a
+    new revision. Which date the ORIGINAL carries decides who may do it."""
+    from app.services import reversal
+
+    try:
+        doc = await reversal.load_document(session, "sales_bill", bill_id)
+        assert_can_edit_dated(principal, doc["bill_date"])
+        return await service.amend_bill(session, principal, bill_id, payload, reason)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Bill not found")
+    except reversal.NotReversible as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except (OverSell, CreditLimitExceeded) as e:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

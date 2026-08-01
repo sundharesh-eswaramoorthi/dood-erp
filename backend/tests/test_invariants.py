@@ -814,3 +814,165 @@ async def test_open_items_ignore_a_reversed_entry(ctx):
     assert len(items) == 1, "only the live figure should be open"
     assert Decimal(items[0]["outstanding"]) == Decimal("200.00")
     assert await _party_net(s, org, party) == Decimal("200.00")
+
+
+# ---------------------------------------------------------------------------
+# v2 §7 amendment (reverse + repost, never mutate)
+# ---------------------------------------------------------------------------
+async def test_cancel_restores_stock_party_and_cash(ctx):
+    """T24: cancelling a posted invoice must leave every ledger exactly where it
+    was before the invoice existed — by posting reversals, not by deleting."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+
+    s, org, branch, godown, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=100)
+
+    before_stock, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    before_party = await _party_net(s, org, party)
+    before_cash = await _account_balance(s, org, account)
+
+    bill = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party, paid_amount=Decimal(200), payment_account_id=account,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(5),
+                                entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+    assert (await _on_hand_and_reserved(s, org, product, branch, godown))[0] == before_stock - 5
+
+    await sales.cancel_bill(s, prin, bill["id"], reason="test")
+    await s.commit()
+
+    after_stock, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert after_stock == before_stock, "stock must come back"
+    assert await _party_net(s, org, party) == before_party, "receivable must come back"
+    assert await _account_balance(s, org, account) == before_cash, "cash must come back"
+
+    # and it was done by APPENDING, not deleting: the originals are still there
+    rows = (await s.execute(text(
+        "SELECT entry_purpose, COUNT(*) c FROM stock_movement_ledger "
+        "WHERE org_id=:o AND source_doc_type='sales_bill' AND source_doc_id=:i "
+        "GROUP BY entry_purpose"), {"o": org, "i": bill["id"]})).mappings().all()
+    purposes = {r["entry_purpose"]: r["c"] for r in rows}
+    assert purposes.get("original") == 1 and purposes.get("reversal") == 1
+
+    # the balances still equal the ledger sums
+    assert after_stock == await _ledger_sum(s, org, product, branch, godown)
+    assert await _account_balance(s, org, account) == await _account_ledger_net(s, org, account)
+
+    status = (await s.execute(text("SELECT status FROM sales_bill WHERE id=:i"),
+                              {"i": bill["id"]})).scalar_one()
+    assert status == "cancelled"
+
+
+async def test_amend_supersedes_and_nets_to_the_new_figures(ctx):
+    """T25: an amendment reverses the original and posts a revision; the net
+    effect is the NEW document only, and both revisions stay linked."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=100)
+
+    before_stock, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    before_party = await _party_net(s, org, party)
+
+    bill = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(5),
+                                entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+
+    new = await sales.amend_bill(s, prin, bill["id"], DirectBillCreate(
+        customer_id=party,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(3),
+                                entered_unit_id=unit, rate=Decimal(120))],
+    ), reason="qty and rate corrected")
+    await s.commit()
+
+    # only the corrected document should be standing: 3 units, 360
+    after_stock, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert after_stock == before_stock - 3
+    assert await _party_net(s, org, party) == before_party + Decimal("360.00")
+    assert after_stock == await _ledger_sum(s, org, product, branch, godown)
+
+    old = (await s.execute(text("SELECT status, superseded_by FROM sales_bill WHERE id=:i"),
+                           {"i": bill["id"]})).mappings().one()
+    assert old["status"] == "cancelled" and old["superseded_by"] == new["id"]
+    rev = (await s.execute(text("SELECT amended_from, revision_no FROM sales_bill WHERE id=:i"),
+                           {"i": new["id"]})).mappings().one()
+    assert rev["amended_from"] == bill["id"] and rev["revision_no"] == 2
+
+    audit = (await s.execute(text(
+        "SELECT action, replaced_by, reason FROM document_amendment "
+        "WHERE doc_type='sales_bill' AND doc_id=:i"), {"i": bill["id"]})).mappings().one()
+    assert audit["action"] == "amend" and audit["replaced_by"] == new["id"]
+
+
+async def test_a_cancelled_document_cannot_be_amended_again(ctx):
+    """T26: double-reversing would credit the party twice."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+    from app.services import reversal
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=50)
+
+    bill = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(2),
+                                entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+    await sales.cancel_bill(s, prin, bill["id"], reason="first")
+    await s.commit()
+
+    with pytest.raises(reversal.NotReversible):
+        await sales.cancel_bill(s, prin, bill["id"], reason="second")
+    await s.rollback()
+
+
+async def test_cancelling_a_purchase_bill_reverses_the_moving_average(ctx):
+    """T27: reversing goods-in must take the cost back out of the WAC, or the
+    valuation drifts every time a bill is corrected."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import BillLineIn, PurchaseBillCreate
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=100)          # 100 @ 10 -> WAC 10
+
+    wac_before = await eng.current_wac(s, org, product, branch)
+    assert wac_before == Decimal("10.000000")
+
+    bill = await purchase.post_bill(s, prin, PurchaseBillCreate(
+        supplier_id=party, godown_id=godown,
+        lines=[BillLineIn(product_id=product, entered_qty=Decimal(100), entered_unit_id=unit,
+                          rate=Decimal(30))],
+    ))
+    await s.commit()
+    assert await eng.current_wac(s, org, product, branch) == Decimal("20.000000")
+
+    await purchase.cancel_bill(s, prin, bill["id"], reason="wrong supplier")
+    await s.commit()
+
+    assert await eng.current_wac(s, org, product, branch) == wac_before, "WAC must return"
+    on_hand, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == Decimal(100)
+    assert on_hand == await _ledger_sum(s, org, product, branch, godown)

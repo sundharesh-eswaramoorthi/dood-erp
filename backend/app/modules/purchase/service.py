@@ -558,3 +558,47 @@ async def list_bills(session: AsyncSession, principal: Principal, limit: int = 1
     ).mappings().all()
     m = ("grand_total", "paid_amount", "balance_amount")
     return [{k: (str(v) if k in m and v is not None else v) for k, v in r.items()} for r in rows]
+
+
+# ---- amendment (v2 §7: editing a posted invoice) ----
+async def cancel_bill(
+    session: AsyncSession, principal: Principal, bill_id: int, reason: str | None = None
+) -> dict:
+    """Void a posted purchase bill by reversing everything it did."""
+    from app.services import reversal
+
+    return await reversal.reverse_document(
+        session, principal, "purchase_bill", bill_id, reason=reason, action="cancel"
+    )
+
+
+async def amend_bill(
+    session: AsyncSession, principal: Principal, bill_id: int, data: PurchaseBillCreate,
+    reason: str | None = None,
+) -> dict:
+    """Replace a posted purchase bill with a corrected revision (see the sales
+    equivalent — the original is reversed, never edited)."""
+    from app.services import reversal
+
+    old = await reversal.load_document(session, "purchase_bill", bill_id)
+    reversal.assert_amendable(old, "purchase_bill")
+
+    await reversal.reverse_document(
+        session, principal, "purchase_bill", bill_id, reason=reason, action="amend"
+    )
+    payload = data.model_copy(update={
+        "supplier_id": data.supplier_id or old["supplier_id"],
+        "branch_id": data.branch_id or old["branch_id"],
+    })
+    new = await post_bill(session, principal, payload)
+    await reversal.link_revision(
+        session, "purchase_bill", bill_id, new["id"], int(old["revision_no"]) + 1
+    )
+    await session.execute(
+        text("UPDATE document_amendment SET replaced_by=:n WHERE doc_type='purchase_bill' "
+             "AND doc_id=:o AND action='amend' AND replaced_by IS NULL"),
+        {"n": new["id"], "o": bill_id},
+    )
+    await emit(session, principal.org_id, "purchase.bill.amended",
+               {"old_bill_id": bill_id, "new_bill_id": new["id"], "reason": reason})
+    return {**new, "amended_from": bill_id, "revision_no": int(old["revision_no"]) + 1}

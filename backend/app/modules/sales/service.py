@@ -776,3 +776,52 @@ async def post_sales_return(session: AsyncSession, principal: Principal, data: S
             "card_charges": t.card_charges, "round_off": t.round_off,
             "grand_total": t.grand_total, "paid_amount": t.paid_amount,
             "balance_amount": t.balance_amount}
+
+
+# ---- amendment (v2 §7: editing a posted invoice) ----
+async def cancel_bill(
+    session: AsyncSession, principal: Principal, bill_id: int, reason: str | None = None
+) -> dict:
+    """Void a posted sales bill by reversing everything it did."""
+    from app.services import reversal
+
+    return await reversal.reverse_document(
+        session, principal, "sales_bill", bill_id, reason=reason, action="cancel"
+    )
+
+
+async def amend_bill(
+    session: AsyncSession, principal: Principal, bill_id: int, data: DirectBillCreate,
+    reason: str | None = None,
+) -> dict:
+    """Replace a posted sales bill with a corrected revision.
+
+    The original is reversed and marked cancelled, never edited — the ledgers
+    are append-only and the stock has already moved. The two revisions point at
+    each other so the original document number stays findable.
+    """
+    from app.services import reversal
+
+    old = await reversal.load_document(session, "sales_bill", bill_id)
+    reversal.assert_amendable(old, "sales_bill")
+
+    await reversal.reverse_document(
+        session, principal, "sales_bill", bill_id, reason=reason, action="amend"
+    )
+    # the correction keeps the original's customer and branch unless told otherwise
+    payload = data.model_copy(update={
+        "customer_id": data.customer_id or old["customer_id"],
+        "branch_id": data.branch_id or old["branch_id"],
+    })
+    new = await post_direct_bill(session, principal, payload)
+    await reversal.link_revision(
+        session, "sales_bill", bill_id, new["id"], int(old["revision_no"]) + 1
+    )
+    await session.execute(
+        text("UPDATE document_amendment SET replaced_by=:n WHERE doc_type='sales_bill' "
+             "AND doc_id=:o AND action='amend' AND replaced_by IS NULL"),
+        {"n": new["id"], "o": bill_id},
+    )
+    await emit(session, principal.org_id, "sale.bill.amended",
+               {"old_bill_id": bill_id, "new_bill_id": new["id"], "reason": reason})
+    return {**new, "amended_from": bill_id, "revision_no": int(old["revision_no"]) + 1}

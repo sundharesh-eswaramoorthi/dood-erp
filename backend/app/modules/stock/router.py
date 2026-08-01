@@ -32,7 +32,7 @@ def _branch(principal: Principal, branch_id: int | None) -> int:
 @router.post("/adjustments", response_model=AdjustmentOut, status_code=status.HTTP_201_CREATED)
 async def post_adjustment(
     payload: AdjustmentCreate,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.adjust")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -94,7 +94,7 @@ async def list_reorder(
 @router.post("/reorder-thresholds", response_model=ReorderOut, status_code=status.HTTP_201_CREATED)
 async def set_reorder(
     payload: ReorderSet,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.adjust")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -109,7 +109,7 @@ async def set_reorder(
 @router.post("/transfers", response_model=TransferOut, status_code=status.HTTP_201_CREATED)
 async def transfer_create(
     payload: TransferCreate,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.transfer")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -123,7 +123,7 @@ async def transfer_create(
 @router.post("/transfers/{transfer_id}/dispatch", response_model=TransferOut)
 async def transfer_dispatch(
     transfer_id: int,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.transfer")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -139,7 +139,7 @@ async def transfer_dispatch(
 @router.post("/transfers/{transfer_id}/receive", response_model=TransferOut)
 async def transfer_receive(
     transfer_id: int,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.transfer")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -154,7 +154,7 @@ async def transfer_receive(
 @router.post("/verifications", response_model=VerificationOut, status_code=status.HTTP_201_CREATED)
 async def verification_create(
     payload: VerificationCreate,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.verify")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:
@@ -168,7 +168,7 @@ async def verification_create(
 @router.post("/verifications/{verification_id}/post", response_model=VerificationOut)
 async def verification_post(
     verification_id: int,
-    principal: Principal = Depends(require_permission("stock.write")),
+    principal: Principal = Depends(require_permission("stock.verify")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
     try:

@@ -73,5 +73,40 @@ def require_permission(perm: str):
     return _check
 
 
+def require_any(*perms: str):
+    """Any one of these is enough."""
+
+    async def _check(principal: Principal = Depends(get_principal)) -> Principal:
+        if not any(principal.has(p) for p in perms):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, f"Missing permission: one of {', '.join(perms)}"
+            )
+        return principal
+
+    return _check
+
+
+def assert_can_edit_dated(principal: Principal, doc_date) -> None:
+    """v2 §7: "edit current date invoice" is a different right from "edit
+    previous date invoice" — a Sales Executive gets the first and not the
+    second, so backdated corrections need a manager.
+
+    Raises 403; call it once the document's own date is known.
+    """
+    import datetime as _dt
+
+    today = _dt.date.today()
+    if doc_date == today:
+        needed = "invoice.edit.today"
+    else:
+        needed = "invoice.edit.backdated"
+    if not principal.has(needed):
+        when = "today's" if needed.endswith("today") else "a previous date's"
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            f"Missing permission: {needed} (editing {when} document)",
+        )
+
+
 def idempotency_key(request: Request) -> str | None:
     return request.headers.get("Idempotency-Key")

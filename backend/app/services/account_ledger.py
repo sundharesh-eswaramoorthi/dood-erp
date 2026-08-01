@@ -14,16 +14,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 async def post_account_entry(
     session: AsyncSession, *, org_id: int, account_id: int, direction: str,
     amount: Decimal, source: tuple[str, int, int], effective_date, created_by: int,
+    entry_purpose: str = "original", reversal_seq: int = 0,
 ) -> Decimal:
+    """entry_purpose/reversal_seq let app.services.reversal negate a posting
+    without touching the original row (the ledger is append-only)."""
     src_type, src_id, line_no = source
     await session.execute(
         text(
             "INSERT INTO account_ledger_entry (org_id, account_id, direction, amount, "
-            "source_doc_type, source_doc_id, source_line_no, effective_date, created_by) "
-            "VALUES (:o,:a,:d,:amt,:st,:sid,:ln,:ed,:by)"
+            "source_doc_type, source_doc_id, source_line_no, entry_purpose, reversal_seq, "
+            "effective_date, created_by) "
+            "VALUES (:o,:a,:d,:amt,:st,:sid,:ln,:pur,:seq,:ed,:by)"
         ),
         {"o": org_id, "a": account_id, "d": direction, "amt": amount, "st": src_type,
-         "sid": src_id, "ln": line_no, "ed": effective_date, "by": created_by},
+         "sid": src_id, "ln": line_no, "pur": entry_purpose, "seq": reversal_seq,
+         "ed": effective_date, "by": created_by},
     )
     cur = Decimal(
         (

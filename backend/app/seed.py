@@ -14,35 +14,79 @@ from app.core.db import SessionLocal, engine
 from app.core.security import hash_password
 from app.services.numbering import current_fin_year
 
+# v2 §7 catalogue — kept in step with alembic 0024 (which is what an existing
+# install runs); this is the fresh-install path.
 PERMISSIONS = [
     ("party.read", "View parties"),
-    ("party.create", "Create/edit parties"),
+    ("party.create", "Create parties"),
+    ("party.edit", "Edit parties"),
     ("product.read", "View products & units"),
-    ("product.create", "Create/edit products"),
+    ("product.create", "Create products"),
+    ("product.edit", "Edit products"),
     ("stock.read", "View stock"),
-    ("stock.write", "Adjust/transfer stock"),
+    ("stock.write", "Adjust/transfer stock (legacy umbrella)"),
+    ("stock.adjust", "Stock adjustments (damage, shortage, opening)"),
+    ("stock.transfer", "Stock transfers between branches/godowns"),
+    ("stock.verify", "Physical stock verification"),
+    ("purchase.read", "View purchases"),
+    ("purchase.create", "Create purchase bills & returns"),
+    ("purchase.order", "Create purchase orders"),
+    ("sales.read", "View sales"),
     ("sales.create", "Create sale orders/bills"),
-    ("purchase.create", "Create purchase bills"),
-    ("reports.view", "View reports"),
-    ("settings.manage", "Manage settings & users"),
+    ("sales.return", "Create sales returns"),
+    ("delivery.read", "View deliveries"),
+    ("delivery.update", "Update delivery status"),
+    ("invoice.edit.today", "Edit an invoice dated today"),
+    ("invoice.edit.backdated", "Edit an invoice dated before today"),
+    ("invoice.cancel", "Cancel a posted invoice"),
+    ("accounts.read", "View accounts & payments"),
     ("accounts.manage", "Manage bank accounts & payments"),
+    ("reports.view", "View reports"),
+    ("users.manage", "Manage users & roles"),
+    ("settings.manage", "Manage settings"),
 ]
 
 ROLES = [
-    ("super_user", "Super User"),
-    ("manager", "Manager"),
-    ("stock_manager", "Stock Manager"),
-    ("salesman", "Salesman"),
-    ("delivery_boy", "Delivery Boy"),
+    ("super_admin", "Super Admin"),
+    ("branch_manager", "Branch Manager"),
+    ("sales_executive", "Sales Executive"),
+    ("purchase_executive", "Purchase Executive"),
+    ("store_keeper", "Store Keeper"),
+    ("delivery_staff", "Delivery Staff"),
 ]
 
-# role -> permission codes (super_user uses the "*" wildcard via is_superuser)
+# role -> permission codes (super_admin uses the "*" wildcard via is_superuser)
 ROLE_PERMS = {
-    "manager": ["party.read", "party.create", "product.read", "product.create", "stock.read",
-                "stock.write", "sales.create", "purchase.create", "reports.view", "accounts.manage"],
-    "stock_manager": ["product.read", "product.create", "stock.read", "stock.write"],
-    "salesman": ["party.read", "party.create", "product.read", "stock.read", "sales.create"],
-    "delivery_boy": ["sales.create"],
+    "branch_manager": [
+        "party.read", "party.create", "party.edit",
+        "product.read", "product.create", "product.edit",
+        "stock.read", "stock.write", "stock.adjust", "stock.transfer", "stock.verify",
+        "purchase.read", "purchase.create", "purchase.order",
+        "sales.read", "sales.create", "sales.return",
+        "delivery.read", "delivery.update",
+        "invoice.edit.today", "invoice.edit.backdated", "invoice.cancel",
+        "accounts.read", "accounts.manage", "reports.view",
+    ],
+    "sales_executive": [
+        "party.read", "party.create", "party.edit",
+        "product.read", "stock.read",
+        "sales.read", "sales.create", "sales.return",
+        "delivery.read", "reports.view", "invoice.edit.today",
+    ],
+    "purchase_executive": [
+        "party.read", "party.create", "party.edit",
+        "product.read", "stock.read",
+        "purchase.read", "purchase.create", "purchase.order",
+        "reports.view", "invoice.edit.today",
+    ],
+    "store_keeper": [
+        "product.read", "product.edit",
+        "stock.read", "stock.write", "stock.adjust", "stock.transfer", "stock.verify",
+        "purchase.read", "sales.read",
+    ],
+    "delivery_staff": [
+        "sales.read", "delivery.read", "delivery.update", "party.read", "product.read",
+    ],
 }
 
 
