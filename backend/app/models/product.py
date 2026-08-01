@@ -42,6 +42,18 @@ class Product(Base):
     hsn_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     gst_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # v2 §2 pricing master — price_inclusive says whether the two prices above
+    # already contain GST, which seeds an invoice's price_mode.
+    sale_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    purchase_price: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    price_inclusive: Mapped[bool] = mapped_column(Boolean, default=False)
+    # sub-unit: how many of it make one base unit (1 BAG = 50 KG -> qty 50)
+    sub_unit_id: Mapped[int | None] = mapped_column(ForeignKey("unit_of_measure.id"), nullable=True)
+    sub_unit_qty: Mapped[Decimal | None] = mapped_column(Numeric(20, 8), nullable=True)
+    opening_qty: Mapped[Decimal | None] = mapped_column(Numeric(20, 6), nullable=True)
+    opening_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    opening_as_of: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    opening_godown_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

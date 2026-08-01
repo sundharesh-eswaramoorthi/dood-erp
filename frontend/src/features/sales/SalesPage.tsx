@@ -165,7 +165,17 @@ export function SalesPage() {
               <TextField label="Godown" select value={f.godown} onChange={(e) => setF({ ...f, godown: e.target.value })} sx={{ width: 160 }}>
                 {(godowns.data ?? []).map((g) => (<MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>))}
               </TextField>
-              <TextField label="Product" select value={f.product} onChange={(e) => setF({ ...f, product: e.target.value })} sx={{ minWidth: 180 }}>
+              <TextField
+                label="Product"
+                select
+                value={f.product}
+                onChange={(e) => {
+                  // pre-fill the rate from the v2 §2 pricing master
+                  const p = products.data?.find((pp) => pp.id === Number(e.target.value));
+                  setF({ ...f, product: e.target.value, rate: p?.sale_price ?? f.rate });
+                }}
+                sx={{ minWidth: 180 }}
+              >
                 {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
               </TextField>
               <TextField label="Qty" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} sx={{ width: 100 }} />

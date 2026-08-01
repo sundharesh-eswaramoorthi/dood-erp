@@ -225,8 +225,15 @@ export function PurchasePage() {
                   <TextField
                     size="small" label="Product" select value={l.product}
                     onChange={(e) => {
+                      // v2 §2 pricing master pre-fills the line; still editable
                       const p = products.data?.find((pp) => pp.id === Number(e.target.value));
-                      setLine(i, { product: e.target.value, gst: p?.gst_rate ?? "", hsn: p?.hsn_code ?? "" });
+                      setLine(i, {
+                        product: e.target.value,
+                        gst: p?.gst_rate ?? "",
+                        hsn: p?.hsn_code ?? "",
+                        rate: p?.purchase_price ?? "",
+                      });
+                      if (p?.price_inclusive) setMny((m) => ({ ...m, price_mode: "inclusive" }));
                     }}
                     sx={{ flex: 1, minWidth: 180 }}
                   >
