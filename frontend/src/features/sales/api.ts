@@ -57,6 +57,9 @@ export interface SalesBill {
   customer_id: number;
   sale_order_id: number | null;
   grand_total: string;
+  paid_amount?: string;
+  balance_amount?: string;
+  bill_date?: string;
 }
 
 export interface BilledOut {

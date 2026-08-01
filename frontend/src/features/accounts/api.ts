@@ -31,15 +31,26 @@ export async function createAccount(payload: {
   return data;
 }
 
+export interface VoucherResult {
+  doc_no: string | null;
+  account_balance: string;
+  party_net: string;
+  unallocated: string;
+  allocations: { doc_type: string; doc_id: number; amount: string }[];
+}
+
 export async function postVoucher(payload: {
   party_id: number;
   account_id: number;
   voucher_type: string;
   amount: string;
   note?: string;
-}): Promise<{ doc_no: string | null; account_balance: string; party_net: string }> {
+  payment_type_id?: number;
+  /** omit to settle the oldest bills first; [] to leave it on account */
+  allocations?: { against_entry_id: number; amount: string }[];
+}): Promise<VoucherResult> {
   const { data } = await api.post("/api/v1/accounts/payment-vouchers", payload);
-  return data as never;
+  return data as VoucherResult;
 }
 
 export async function listVouchers(): Promise<Voucher[]> {
@@ -79,5 +90,83 @@ export async function postExpense(payload: {
 
 export async function listExpenses(): Promise<Expense[]> {
   const { data } = await api.get<Expense[]>("/api/v1/accounts/expenses");
+  return data;
+}
+
+// ---- payment types (v2 §3 "add payment type") ----
+export interface PaymentType {
+  id: number;
+  name: string;
+  kind: string;
+  default_account_id: number | null;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export async function listPaymentTypes(includeInactive = false): Promise<PaymentType[]> {
+  const { data } = await api.get<PaymentType[]>("/api/v1/accounts/payment-types", {
+    params: { include_inactive: includeInactive },
+  });
+  return data;
+}
+
+export async function createPaymentType(payload: {
+  name: string;
+  kind?: string;
+}): Promise<PaymentType> {
+  const { data } = await api.post<PaymentType>("/api/v1/accounts/payment-types", payload);
+  return data;
+}
+
+export async function updatePaymentType(
+  id: number,
+  payload: Partial<PaymentType>,
+): Promise<PaymentType> {
+  const { data } = await api.put<PaymentType>(`/api/v1/accounts/payment-types/${id}`, payload);
+  return data;
+}
+
+// ---- bill-wise settlement (v2 §3 payment history) ----
+export interface OpenItem {
+  entry_id: number;
+  source_doc_type: string;
+  source_doc_id: number;
+  effective_date: string;
+  amount: string;
+  settled: string;
+  outstanding: string;
+}
+
+export async function listOpenItems(partyId: number, side = "debit"): Promise<OpenItem[]> {
+  const { data } = await api.get<OpenItem[]>(
+    `/api/v1/accounts/parties/${partyId}/open-items`,
+    { params: { side } },
+  );
+  return data;
+}
+
+export interface DocPayment {
+  amount: string;
+  source_doc_type: string;
+  source_doc_id: number;
+  effective_date: string;
+  doc_no: string | null;
+  voucher_type: string | null;
+  payment_type: string | null;
+}
+
+export interface PaymentHistory {
+  invoice_total: string;
+  settled: string;
+  outstanding: string;
+  payments: DocPayment[];
+}
+
+/** v2 §3 "Payment link": the invoice's own settlement history. */
+export async function billPayments(
+  kind: "sales" | "purchase",
+  billId: number,
+): Promise<PaymentHistory> {
+  const { data } = await api.get<PaymentHistory>(`/api/v1/${kind}/bills/${billId}/payments`);
   return data;
 }

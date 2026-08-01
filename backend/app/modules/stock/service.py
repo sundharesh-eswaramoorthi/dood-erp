@@ -407,4 +407,30 @@ async def reconcile(session: AsyncSession, principal: Principal) -> dict:
             )
         )
     ).mappings().all()
-    return {"ok": len(drift) == 0, "drift_rows": [dict(d) for d in drift]}
+
+    # v2 §3: allocations must never claim more than either side carries,
+    # otherwise bill-wise outstanding stops reconciling with party_balance.
+    alloc_drift = (
+        await session.execute(
+            text(
+                """
+                SELECT 'over_allocated' AS kind, e.id AS entry_id, e.amount,
+                       SUM(a.amount) AS applied
+                FROM party_ledger_entry e
+                JOIN ledger_allocation a ON a.against_entry_id = e.id
+                GROUP BY e.id, e.amount HAVING SUM(a.amount) > e.amount
+                UNION ALL
+                SELECT 'over_applied', e.id, e.amount, SUM(a.amount)
+                FROM party_ledger_entry e
+                JOIN ledger_allocation a ON a.settle_entry_id = e.id
+                GROUP BY e.id, e.amount HAVING SUM(a.amount) > e.amount
+                """
+            )
+        )
+    ).mappings().all()
+
+    return {
+        "ok": len(drift) == 0 and len(alloc_drift) == 0,
+        "drift_rows": [dict(d) for d in drift],
+        "allocation_drift": [dict(d) for d in alloc_drift],
+    }

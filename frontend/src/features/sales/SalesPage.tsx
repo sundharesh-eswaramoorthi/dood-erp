@@ -23,7 +23,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
-import { listAccounts } from "../accounts/api";
+import { billPayments, listAccounts } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
@@ -60,6 +60,7 @@ export function SalesPage() {
   const [f, setF] = useState(EMPTY);
   const [msg, setMsg] = useState<string | null>(null);
   const [billing, setBilling] = useState<number | null>(null);
+  const [historyFor, setHistoryFor] = useState<number | null>(null);
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
 
   useEffect(() => {
@@ -357,8 +358,10 @@ export function SalesPage() {
               <TableRow>
                 <TableCell>Doc</TableCell>
                 <TableCell>Customer</TableCell>
-                <TableCell>Order</TableCell>
+                <TableCell>Source</TableCell>
                 <TableCell align="right">Grand total</TableCell>
+                <TableCell align="right">Balance</TableCell>
+                <TableCell align="right">Payments</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -366,13 +369,27 @@ export function SalesPage() {
                 <TableRow key={b.id}>
                   <TableCell><code>{b.doc_no}</code></TableCell>
                   <TableCell>{partyName(b.customer_id)}</TableCell>
-                  <TableCell>{b.sale_order_id ? `#${b.sale_order_id}` : "—"}</TableCell>
+                  <TableCell>
+                    {b.sale_order_id
+                      ? `Order #${b.sale_order_id}`
+                      : <Chip size="small" label="counter" variant="outlined" />}
+                  </TableCell>
                   <TableCell align="right">₹{b.grand_total}</TableCell>
+                  <TableCell align="right">
+                    {b.balance_amount != null && Number(b.balance_amount) > 0 ? (
+                      <Typography variant="body2" color="error.main">₹{b.balance_amount}</Typography>
+                    ) : (
+                      <Chip size="small" color="success" label="paid" variant="outlined" />
+                    )}
+                  </TableCell>
+                  <TableCell align="right">
+                    <Button size="small" onClick={() => setHistoryFor(b.id)}>History</Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {(bills.data ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4}>
+                  <TableCell colSpan={6}>
                     <Typography color="text.secondary">No bills yet.</Typography>
                   </TableCell>
                 </TableRow>
@@ -381,6 +398,8 @@ export function SalesPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <PaymentHistoryDialog billId={historyFor} onClose={() => setHistoryFor(null)} />
 
       <BillDialog
         orderId={billing}
@@ -469,6 +488,75 @@ function BillDialog({
         >
           Post bill
         </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+
+/** v2 §3 "Payment history" — what has settled this invoice and what is left. */
+function PaymentHistoryDialog({
+  billId,
+  onClose,
+}: {
+  billId: number | null;
+  onClose: () => void;
+}) {
+  const history = useQuery({
+    queryKey: ["bill-payments", billId],
+    queryFn: () => billPayments("sales", billId!),
+    enabled: billId != null,
+  });
+  const h = history.data;
+
+  return (
+    <Dialog open={billId != null} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>Payment history</DialogTitle>
+      <DialogContent>
+        {h ? (
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+              <Chip label={`Invoice ₹${h.invoice_total}`} />
+              <Chip color="success" label={`Settled ₹${h.settled}`} />
+              <Chip color={Number(h.outstanding) > 0 ? "error" : "default"}
+                label={`Outstanding ₹${h.outstanding}`} />
+            </Stack>
+            <Divider />
+            {h.payments.length === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                Nothing has been settled against this invoice yet.
+              </Typography>
+            ) : (
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Source</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell align="right">Amount</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {h.payments.map((p, i) => (
+                    <TableRow key={i}>
+                      <TableCell>{p.effective_date}</TableCell>
+                      <TableCell>
+                        {p.doc_no ?? p.source_doc_type.replace(/_/g, " ")}
+                      </TableCell>
+                      <TableCell>{p.payment_type ?? "—"}</TableCell>
+                      <TableCell align="right">₹{p.amount}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </Stack>
+        ) : (
+          <Typography color="text.secondary">Loading…</Typography>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
   );

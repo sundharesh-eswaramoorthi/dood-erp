@@ -21,6 +21,13 @@ class AccountOut(BaseModel):
     current_balance: Decimal
 
 
+class AllocationIn(BaseModel):
+    """Settle a specific outstanding ledger entry (i.e. a specific bill)."""
+
+    against_entry_id: int
+    amount: Decimal = Field(gt=0)
+
+
 class VoucherCreate(BaseModel):
     party_id: int
     account_id: int
@@ -29,6 +36,17 @@ class VoucherCreate(BaseModel):
     branch_id: int | None = None
     voucher_date: dt.date | None = None
     note: str | None = None
+    payment_type_id: int | None = None          # v2 §3 "Payment type"
+    # v2 §3 payment history: which bills this settles. Omit to let it run down
+    # the oldest open items first; send [] to leave it on account.
+    allocations: list[AllocationIn] | None = None
+
+
+class AllocationOut(BaseModel):
+    against_entry_id: int
+    amount: Decimal
+    doc_type: str
+    doc_id: int
 
 
 class VoucherOut(BaseModel):
@@ -40,6 +58,44 @@ class VoucherOut(BaseModel):
     amount: Decimal
     account_balance: Decimal
     party_net: Decimal
+    payment_type_id: int | None = None
+    allocations: list[AllocationOut] = []
+    unallocated: Decimal = Decimal(0)
+
+
+# ---- payment types (v2 §3 "add payment type") ----
+class PaymentTypeCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    kind: str = Field(default="other", pattern="^(cash|bank|card|upi|cheque|credit|other)$")
+    default_account_id: int | None = None
+    sort_order: int = 0
+
+
+class PaymentTypeUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    kind: str | None = Field(default=None, pattern="^(cash|bank|card|upi|cheque|credit|other)$")
+    default_account_id: int | None = None
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
+class PaymentTypeOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    default_account_id: int | None
+    is_active: bool
+    sort_order: int
+
+
+class OpenItemOut(BaseModel):
+    entry_id: int
+    source_doc_type: str
+    source_doc_id: int
+    effective_date: dt.date
+    amount: Decimal
+    settled: Decimal
+    outstanding: Decimal
 
 
 class ExpenseCategoryCreate(BaseModel):

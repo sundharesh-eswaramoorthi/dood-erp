@@ -21,7 +21,10 @@ import { useEffect, useState } from "react";
 import { listParties } from "../parties/api";
 import {
   createAccount,
+  createPaymentType,
   listAccounts,
+  listOpenItems,
+  listPaymentTypes,
   listExpenseCategories,
   listExpenses,
   listVouchers,
@@ -29,6 +32,7 @@ import {
   postVoucher,
   type Account,
   type Expense,
+  type OpenItem,
   type Voucher,
 } from "./api";
 
@@ -38,11 +42,15 @@ export function AccountsPage() {
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
   const vouchers = useQuery({ queryKey: ["vouchers"], queryFn: listVouchers });
 
+  const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
   const categories = useQuery({ queryKey: ["expense-categories"], queryFn: listExpenseCategories });
   const expenses = useQuery({ queryKey: ["expenses"], queryFn: listExpenses });
 
   const [acc, setAcc] = useState({ name: "", account_type: "bank", opening: "0" });
-  const [v, setV] = useState({ party: "", account: "", type: "receipt", amount: "", note: "" });
+  const [v, setV] = useState({ party: "", account: "", type: "receipt", amount: "", note: "", payment_type: "" });
+  // v2 §3: which bills this settles. Empty selection = oldest first (FIFO).
+  const [picked, setPicked] = useState<Record<number, string>>({});
+  const [newPayType, setNewPayType] = useState("");
   const [ex, setEx] = useState({ account: "", category: "", amount: "", note: "" });
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -64,14 +72,49 @@ export function AccountsPage() {
     },
   });
 
+  // What this party still owes, bill by bill — a receipt settles a debit,
+  // a payment settles a credit.
+  const openItems = useQuery({
+    queryKey: ["open-items", v.party, v.type],
+    queryFn: () => listOpenItems(Number(v.party), v.type === "receipt" ? "debit" : "credit"),
+    enabled: !!v.party,
+  });
+
+  const addPayType = useMutation({
+    mutationFn: () => createPaymentType({ name: newPayType }),
+    onSuccess: () => {
+      setNewPayType("");
+      qc.invalidateQueries({ queryKey: ["payment-types"] });
+    },
+  });
+
   const pay = useMutation({
-    mutationFn: () =>
-      postVoucher({ party_id: Number(v.party), account_id: Number(v.account), voucher_type: v.type, amount: v.amount, note: v.note }),
+    mutationFn: () => {
+      const chosen = Object.entries(picked)
+        .filter(([, amt]) => amt && Number(amt) > 0)
+        .map(([entry, amt]) => ({ against_entry_id: Number(entry), amount: amt }));
+      return postVoucher({
+        party_id: Number(v.party),
+        account_id: Number(v.account),
+        voucher_type: v.type,
+        amount: v.amount,
+        note: v.note,
+        payment_type_id: v.payment_type ? Number(v.payment_type) : undefined,
+        // omit entirely to let the server settle the oldest bills first
+        ...(chosen.length ? { allocations: chosen } : {}),
+      });
+    },
     onSuccess: (r) => {
-      setMsg(`${r.doc_no}: account balance ₹${r.account_balance}, party net ₹${r.party_net}.`);
+      const applied = r.allocations?.length
+        ? ` Settled ${r.allocations.length} bill(s)` +
+          (Number(r.unallocated) ? `, ₹${r.unallocated} left on account.` : ".")
+        : "";
+      setMsg(`${r.doc_no}: account balance ₹${r.account_balance}, party net ₹${r.party_net}.${applied}`);
       setV({ ...v, amount: "", note: "" });
+      setPicked({});
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["vouchers"] });
+      qc.invalidateQueries({ queryKey: ["open-items"] });
     },
     onError: (e: unknown) => {
       const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -144,13 +187,72 @@ export function AccountsPage() {
                 {(accounts.data ?? []).map((a) => (<MenuItem key={a.id} value={String(a.id)}>{a.name}</MenuItem>))}
               </TextField>
               <TextField label="Amount" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} sx={{ width: 120 }} />
+              <TextField label="Payment type" select value={v.payment_type}
+                onChange={(e) => setV({ ...v, payment_type: e.target.value })} sx={{ minWidth: 150 }}>
+                <MenuItem value=""><em>Unspecified</em></MenuItem>
+                {(paymentTypes.data ?? []).map((t) => (<MenuItem key={t.id} value={String(t.id)}>{t.name}</MenuItem>))}
+              </TextField>
               <TextField label="Note" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} />
               <Button type="submit" variant="contained" disabled={pay.isPending}>Post</Button>
             </Stack>
+
+            {(openItems.data ?? []).length > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Settle against {v.type === "receipt" ? "these bills" : "these payables"}
+                  <Typography component="span" variant="caption" color="text.secondary">
+                    {" "}— leave blank to settle the oldest first
+                  </Typography>
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Document</TableCell>
+                      <TableCell>Date</TableCell>
+                      <TableCell align="right">Amount</TableCell>
+                      <TableCell align="right">Outstanding</TableCell>
+                      <TableCell align="right" sx={{ width: 150 }}>Settle</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(openItems.data ?? []).map((it: OpenItem) => (
+                      <TableRow key={it.entry_id}>
+                        <TableCell>
+                          {it.source_doc_type.replace(/_/g, " ")} #{it.source_doc_id}
+                        </TableCell>
+                        <TableCell>{it.effective_date}</TableCell>
+                        <TableCell align="right">₹{it.amount}</TableCell>
+                        <TableCell align="right"><strong>₹{it.outstanding}</strong></TableCell>
+                        <TableCell align="right">
+                          <TextField
+                            size="small" placeholder="0.00"
+                            value={picked[it.entry_id] ?? ""}
+                            onChange={(e) => setPicked({ ...picked, [it.entry_id]: e.target.value })}
+                            sx={{ width: 130 }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
+            )}
           </Box>
           <Typography variant="caption" color="text.secondary">
             Receipt = customer pays (party ledger credit + account in). Payment = we pay a supplier (party debit + account out). One transaction.
           </Typography>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle2">Payment types</Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center" sx={{ mt: 1 }}>
+              {(paymentTypes.data ?? []).map((t) => (
+                <Chip key={t.id} size="small" label={t.name} variant="outlined" />
+              ))}
+              <TextField size="small" label="Add type" value={newPayType}
+                onChange={(e) => setNewPayType(e.target.value)} sx={{ width: 160 }} />
+              <Button size="small" onClick={() => newPayType && addPayType.mutate()}
+                disabled={addPayType.isPending || !newPayType}>Add</Button>
+            </Stack>
+          </Box>
         </CardContent>
       </Card>
 

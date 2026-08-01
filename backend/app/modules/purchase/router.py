@@ -127,3 +127,15 @@ async def cancel_order(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.get("/bills/{bill_id}/payments")
+async def bill_payments(
+    bill_id: int,
+    principal: Principal = Depends(require_permission("purchase.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """v2 §3 "Payment history" — what has settled this bill, and what is left."""
+    from app.services import allocation as alloc
+
+    return await alloc.document_payments(session, principal.org_id, "purchase_bill", bill_id)

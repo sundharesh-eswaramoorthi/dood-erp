@@ -103,3 +103,9 @@ async def settle_at_post(
         amount=amount, source=(f"{doc_type}_payment", doc_id, 0),
         effective_date=effective_date, created_by=created_by,
     )
+    # Money handed over with the invoice settles THAT invoice. Leaving it
+    # unallocated would show the bill as fully outstanding while the party
+    # balance already reflected the cash (v2 §3 payment history).
+    from app.services import allocation as alloc  # local import: avoids a cycle
+
+    await alloc.settle_own_document(session, org_id, doc_type, doc_id)

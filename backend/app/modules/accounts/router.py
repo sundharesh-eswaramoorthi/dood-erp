@@ -8,13 +8,19 @@ from app.modules.accounts import service
 from app.modules.accounts.schemas import (
     AccountCreate,
     AccountOut,
+    AllocationIn,
     ExpenseCategoryCreate,
     ExpenseCategoryOut,
     ExpenseCreate,
     ExpenseOut,
+    OpenItemOut,
+    PaymentTypeCreate,
+    PaymentTypeOut,
+    PaymentTypeUpdate,
     VoucherCreate,
     VoucherOut,
 )
+from app.services.allocation import AllocationError
 
 router = APIRouter()
 
@@ -102,3 +108,69 @@ async def list_expenses(
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_expenses(session, principal)
+
+
+# ---- payment types (v2 §3 "add payment type") ----
+@router.get("/payment-types", response_model=list[PaymentTypeOut])
+async def payment_types_list(
+    include_inactive: bool = False,
+    principal: Principal = Depends(get_principal),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_payment_types(session, principal, include_inactive)
+
+
+@router.post("/payment-types", response_model=PaymentTypeOut, status_code=status.HTTP_201_CREATED)
+async def payment_types_create(
+    payload: PaymentTypeCreate,
+    principal: Principal = Depends(require_permission("accounts.manage")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.create_payment_type(session, principal, payload)
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.put("/payment-types/{pt_id}", response_model=PaymentTypeOut)
+async def payment_types_update(
+    pt_id: int,
+    payload: PaymentTypeUpdate,
+    principal: Principal = Depends(require_permission("accounts.manage")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.update_payment_type(session, principal, pt_id, payload)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment type not found")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+# ---- bill-wise settlement (v2 §3 payment history) ----
+@router.get("/parties/{party_id}/open-items", response_model=list[OpenItemOut])
+async def open_items(
+    party_id: int,
+    side: str = "debit",
+    principal: Principal = Depends(require_permission("accounts.manage")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """Bills this party still owes on ('debit'), or that we owe them ('credit')."""
+    return await service.party_open_items(session, principal, party_id, side)
+
+
+@router.post("/vouchers/{voucher_id}/allocate")
+async def allocate_voucher(
+    voucher_id: int,
+    allocations: list[AllocationIn] | None = None,
+    principal: Principal = Depends(require_permission("accounts.manage")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """Apply an already-posted receipt/payment to specific bills. Send nothing
+    to run it down the oldest open items."""
+    try:
+        return await service.allocate_voucher(session, principal, voucher_id, allocations)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Payment voucher not found")
+    except AllocationError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

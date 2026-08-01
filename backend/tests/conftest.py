@@ -81,7 +81,7 @@ async def ctx(migrated_db):
         fy = current_fin_year()
         for doc_type, prefix in [("sale_order", "SO-"), ("delivery", "DLV-"), ("sales_bill", "SB-"),
                                  ("sales_return", "SR-"), ("purchase_bill", "PB-"),
-                                 ("purchase_return", "PR-"), ("purchase_order", "PO-")]:
+                                 ("purchase_return", "PR-"), ("purchase_order", "PO-"), ("payment_voucher", "PV-")]:
             await s.execute(
                 text("INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
                      "VALUES (:o, NULL, :d, :fy, :px, 4)"),

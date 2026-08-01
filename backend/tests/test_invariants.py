@@ -649,3 +649,168 @@ async def test_sale_order_is_priced_like_its_bill(ctx):
         discount_pct=Decimal(10), card_charges=Decimal(5)))
     await s.commit()
     assert Decimal(bill["grand_total"]) == Decimal(order["grand_total"])
+
+
+# ---------------------------------------------------------------------------
+# v2 §3 bill-wise settlement (ledger_allocation)
+# ---------------------------------------------------------------------------
+async def _outstanding(s, org, party, side="debit"):
+    from app.services import allocation as alloc
+    return {i["source_doc_id"]: Decimal(i["outstanding"])
+            for i in await alloc.open_items(s, org, party, side)}
+
+
+async def test_allocation_never_exceeds_either_side(ctx):
+    """T20: an allocation cannot claim more than the payment has left, nor more
+    than the bill still owes. Both caps are what keeps bill-wise outstanding
+    reconcilable with party_balance."""
+    from app.core.deps import Principal
+    from app.modules.accounts import service as accounts
+    from app.modules.accounts.schemas import AllocationIn, VoucherCreate
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+    from app.services import allocation as alloc
+
+    s, org, branch, godown, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=100)
+
+    bill = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(5),
+                                entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+    assert Decimal(bill["grand_total"]) == Decimal("500.00")
+
+    open_now = await alloc.open_items(s, org, party, "debit")
+    entry_id = open_now[0]["entry_id"]
+
+    # more than the bill owes
+    with pytest.raises(alloc.AllocationError):
+        await accounts.post_voucher(s, prin, VoucherCreate(
+            party_id=party, account_id=account, voucher_type="receipt", amount=Decimal(900),
+            allocations=[AllocationIn(against_entry_id=entry_id, amount=Decimal(900))],
+        ))
+    await s.rollback()
+
+    # more than the payment carries
+    with pytest.raises(alloc.AllocationError):
+        await accounts.post_voucher(s, prin, VoucherCreate(
+            party_id=party, account_id=account, voucher_type="receipt", amount=Decimal(100),
+            allocations=[AllocationIn(against_entry_id=entry_id, amount=Decimal(400))],
+        ))
+    await s.rollback()
+
+
+async def test_fifo_settles_oldest_first_and_history_reads_back(ctx):
+    """T21: an unallocated receipt runs down the oldest open bills, and each
+    invoice can then say what settled it (v2 §3 payment history)."""
+    from app.core.deps import Principal
+    from app.modules.accounts import service as accounts
+    from app.modules.accounts.schemas import VoucherCreate
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+    from app.services import allocation as alloc
+
+    s, org, branch, godown, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=100)
+
+    ids = []
+    for qty in (2, 3):                       # 200 then 300
+        b = await sales.post_direct_bill(s, prin, DirectBillCreate(
+            customer_id=party,
+            lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(qty),
+                                    entered_unit_id=unit, rate=Decimal(100))],
+        ))
+        ids.append(b["id"])
+    await s.commit()
+
+    # 350 pays the first in full and part of the second
+    await accounts.post_voucher(s, prin, VoucherCreate(
+        party_id=party, account_id=account, voucher_type="receipt", amount=Decimal(350),
+    ))
+    await s.commit()
+
+    out = await _outstanding(s, org, party)
+    assert ids[0] not in out, "the oldest bill should be fully settled"
+    assert out[ids[1]] == Decimal("150.00")
+
+    hist = await alloc.document_payments(s, org, "sales_bill", ids[1])
+    assert Decimal(hist["settled"]) == Decimal("150.00")
+    assert Decimal(hist["outstanding"]) == Decimal("150.00")
+    assert len(hist["payments"]) == 1
+
+    # bill-wise outstanding must agree with the party balance
+    total_out = sum(out.values(), Decimal(0))
+    assert await _party_net(s, org, party) == total_out
+
+
+async def test_paid_at_bill_time_settles_that_bill_not_the_oldest(ctx):
+    """T22: cash handed over WITH an invoice belongs to that invoice. FIFO would
+    put it against an older bill, which is wrong at the counter."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import DirectBillCreate, DirectBillLineIn
+    from app.services import allocation as alloc
+
+    s, org, branch, godown, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx, qty=100)
+
+    old = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(2),
+                                entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+    new = await sales.post_direct_bill(s, prin, DirectBillCreate(
+        customer_id=party, paid_amount=Decimal(150), payment_account_id=account,
+        lines=[DirectBillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(3),
+                                entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+
+    out = await _outstanding(s, org, party)
+    assert out[old["id"]] == Decimal("200.00"), "the older bill must be untouched"
+    assert out[new["id"]] == Decimal("150.00"), "the cash settled its own bill"
+    hist = await alloc.document_payments(s, org, "sales_bill", new["id"])
+    assert Decimal(hist["settled"]) == Decimal("150.00")
+
+
+async def test_open_items_ignore_a_reversed_entry(ctx):
+    """T23: correcting a figure leaves the superseded original in the ledger
+    (append-only). It must not still read as owed."""
+    from app.services import allocation as alloc
+    from app.services.party_ledger import post_entry
+
+    s, org, branch, party = ctx["s"], ctx["org"], ctx["branch"], ctx["party"]
+
+    await post_entry(s, org_id=org, branch_id=branch, party_id=party, entry_side="debit",
+                     amount=Decimal(500), source=("party_opening", party, 0),
+                     effective_date=TODAY, created_by=1)
+    await s.commit()
+    assert len(await alloc.open_items(s, org, party, "debit")) == 1
+
+    # correct it: reverse the 500, post 200 in its place
+    await post_entry(s, org_id=org, branch_id=branch, party_id=party, entry_side="credit",
+                     amount=Decimal(500), source=("party_opening", party, 0),
+                     effective_date=TODAY, created_by=1,
+                     entry_purpose="reversal", reversal_seq=1)
+    await post_entry(s, org_id=org, branch_id=branch, party_id=party, entry_side="debit",
+                     amount=Decimal(200), source=("party_opening", party, 0),
+                     effective_date=TODAY, created_by=1,
+                     entry_purpose="original", reversal_seq=1)
+    await s.commit()
+
+    items = await alloc.open_items(s, org, party, "debit")
+    assert len(items) == 1, "only the live figure should be open"
+    assert Decimal(items[0]["outstanding"]) == Decimal("200.00")
+    assert await _party_net(s, org, party) == Decimal("200.00")
