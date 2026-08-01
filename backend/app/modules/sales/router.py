@@ -15,6 +15,7 @@ from app.modules.sales.schemas import (
     SalesReturnCreate,
     SalesReturnOut,
 )
+from app.services.credit import CreditLimitExceeded
 from app.services.stock_engine import OverSell
 
 router = APIRouter()
@@ -28,7 +29,7 @@ async def create_order(
 ):
     try:
         return await service.create_order(session, principal, payload)
-    except OverSell as e:
+    except (OverSell, CreditLimitExceeded) as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except PermissionError as e:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
@@ -144,7 +145,7 @@ async def bill_order(
         return await service.bill_order(session, principal, order_id, supply)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
-    except OverSell as e:
+    except (OverSell, CreditLimitExceeded) as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

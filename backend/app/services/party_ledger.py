@@ -24,17 +24,24 @@ async def post_entry(
     effective_date,
     created_by: int,
     gst_registration_id: int | None = None,
+    entry_purpose: str = "original",
+    reversal_seq: int = 0,
 ) -> Decimal:
+    """entry_purpose/reversal_seq let a caller correct an already-posted figure
+    without mutating history: post the reversal, then the replacement, both
+    under the same source doc but a fresh seq (uq_party_ledger_source)."""
     src_type, src_id, line_no = source
     await session.execute(
         text(
             "INSERT INTO party_ledger_entry "
             "(org_id, branch_id, party_id, gst_registration_id, entry_side, amount, "
-            " source_doc_type, source_doc_id, source_line_no, effective_date, created_by) "
-            "VALUES (:o, :b, :p, :gr, :sd, :amt, :st, :sid, :ln, :ed, :by)"
+            " source_doc_type, source_doc_id, source_line_no, entry_purpose, reversal_seq, "
+            " effective_date, created_by) "
+            "VALUES (:o, :b, :p, :gr, :sd, :amt, :st, :sid, :ln, :pur, :seq, :ed, :by)"
         ),
         {"o": org_id, "b": branch_id, "p": party_id, "gr": gst_registration_id, "sd": entry_side,
-         "amt": amount, "st": src_type, "sid": src_id, "ln": line_no, "ed": effective_date, "by": created_by},
+         "amt": amount, "st": src_type, "sid": src_id, "ln": line_no, "pur": entry_purpose,
+         "seq": reversal_seq, "ed": effective_date, "by": created_by},
     )
     # ensure + lock the balance row
     await session.execute(

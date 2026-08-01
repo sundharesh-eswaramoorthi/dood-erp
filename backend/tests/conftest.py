@@ -68,7 +68,8 @@ async def ctx(migrated_db):
             {"o": org, "u": unit},
         )).scalar_one()
         party = (await s.execute(
-            text("INSERT INTO party (org_id, branch_id, party_code, name, created_by) VALUES (:o,:b,'C1','Cust',1) RETURNING id"),
+            text("INSERT INTO party (org_id, serving_branch_id, party_code, name, area, created_by) "
+                 "VALUES (:o,:b,'C1','Cust','Central',1) RETURNING id"),
             {"o": org, "b": branch},
         )).scalar_one()
         from app.services.numbering import current_fin_year

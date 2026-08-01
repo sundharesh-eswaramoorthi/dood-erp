@@ -13,6 +13,7 @@ from decimal import Decimal
 from app.core.deps import Principal
 from app.models.party import Party
 from app.modules.sales.schemas import DeliveryCreate, SaleOrderCreate, SalesReturnCreate
+from app.services import credit
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
 from app.services.outbox import emit
@@ -75,6 +76,7 @@ async def create_order(session: AsyncSession, principal: Principal, data: SaleOr
         )
     ).scalar_one()
 
+    order_value = Decimal(0)
     for i, line in enumerate(data.lines, start=1):
         base = await eng.to_base(session, line.product_id, line.entered_qty, line.entered_unit_id)
         await session.execute(
@@ -85,11 +87,18 @@ async def create_order(session: AsyncSession, principal: Principal, data: SaleOr
             {"o": principal.org_id, "ord": order_id, "ln": i, "p": line.product_id, "g": line.godown_id,
              "eq": line.entered_qty, "eu": line.entered_unit_id, "bq": base, "rt": line.rate},
         )
+        order_value += (base * Decimal(line.rate)).quantize(Q2)
         allow_neg = await eng.product_allows_negative(session, line.product_id)
         await eng.reserve_stock(
             session, org_id=principal.org_id, branch_id=branch_id, godown_id=line.godown_id,
             product_id=line.product_id, qty=base, order_id=order_id, order_line_no=i, allow_negative=allow_neg,
         )
+
+    # v2 §1 credit limit — advisory gate at order time (ex-tax value); the bill
+    # re-checks on the exact grand total. Raising here rolls the whole txn back,
+    # so the reservations above are undone with it.
+    await credit.check(session, principal.org_id, data.customer_id, order_value)
+
     await emit(session, principal.org_id, "sale.order", {"order_id": order_id, "customer_id": data.customer_id})
     return await get_order(session, order_id)
 
@@ -399,6 +408,8 @@ async def bill_order(session: AsyncSession, principal: Principal, order_id: int,
         text("UPDATE sales_bill SET taxable_total=:t, tax_total=:x, cogs_total=:c, grand_total=:g WHERE id=:i"),
         {"t": taxable_total, "x": tax_total, "c": cogs_total, "g": grand_total, "i": bill_id},
     )
+    # Exact credit check on the real invoice value, before the receivable posts.
+    await credit.check(session, principal.org_id, order["customer_id"], grand_total)
     await post_party_entry(session, org_id=principal.org_id, branch_id=branch, party_id=order["customer_id"],
                            entry_side="debit", amount=grand_total, source=("sales_bill", bill_id, 0),
                            effective_date=dt.date.today(), created_by=principal.user_id)

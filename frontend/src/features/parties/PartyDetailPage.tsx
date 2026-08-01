@@ -34,7 +34,7 @@ export function PartyDetailPage() {
   const qc = useQueryClient();
   const party = useQuery({ queryKey: ["party", partyId], queryFn: () => getParty(partyId) });
 
-  const [contact, setContact] = useState({ name: "", phone: "" });
+  const [contact, setContact] = useState({ name: "", phone: "", relationship: "" });
   const [address, setAddress] = useState({ line1: "", city: "", lat: "", lng: "" });
   const [gstin, setGstin] = useState("");
   const [ledger, setLedger] = useState({ side: "debit", amount: "", note: "" });
@@ -64,9 +64,14 @@ export function PartyDetailPage() {
   });
 
   const mContact = useMutation({
-    mutationFn: () => addContact(partyId, { name: contact.name, phone: contact.phone }),
+    mutationFn: () =>
+      addContact(partyId, {
+        name: contact.name,
+        phone: contact.phone,
+        relationship: contact.relationship || undefined,
+      }),
     onSuccess: () => {
-      setContact({ name: "", phone: "" });
+      setContact({ name: "", phone: "", relationship: "" });
       invalidate();
     },
   });
@@ -107,9 +112,15 @@ export function PartyDetailPage() {
           </Typography>
           <Chip label={p.party_code} />
           <Chip label={p.party_type} color="secondary" variant="outlined" />
+          <Chip
+            label={p.is_active ? "Active" : "Inactive"}
+            color={p.is_active ? "success" : "default"}
+            variant="outlined"
+          />
         </Stack>
         <Typography color="text.secondary">
-          Phone {p.phone || "—"} · PAN {p.pan || "—"} · Credit limit {p.credit_limit || "—"}
+          Area {p.area || "—"} · Phone {p.phone || "—"} · PAN {p.pan || "—"} · Credit limit{" "}
+          {p.credit_limit || "—"} · Serving branch #{p.serving_branch_id}
         </Typography>
       </Box>
 
@@ -153,7 +164,8 @@ export function PartyDetailPage() {
           <Divider sx={{ my: 1 }} />
           {p.contacts.map((c) => (
             <Typography key={c.id} variant="body2">
-              • {c.name} {c.phone ? `· ${c.phone}` : ""} {c.is_primary ? "★" : ""}
+              • {c.name} {c.relationship ? `(${c.relationship})` : ""}{" "}
+              {c.phone ? `· ${c.phone}` : ""} {c.is_primary ? "★" : ""}
             </Typography>
           ))}
           {p.contacts.length === 0 && (
@@ -180,6 +192,13 @@ export function PartyDetailPage() {
                 label="Phone"
                 value={contact.phone}
                 onChange={(e) => setContact({ ...contact, phone: e.target.value })}
+              />
+              <TextField
+                size="small"
+                label="Relationship"
+                placeholder="Owner, Son, Accountant…"
+                value={contact.relationship}
+                onChange={(e) => setContact({ ...contact, relationship: e.target.value })}
               />
               <Button type="submit" variant="contained" disabled={mContact.isPending}>
                 Add contact
@@ -330,11 +349,29 @@ export function PartyDetailPage() {
 
       <Card>
         <CardContent>
-          <Typography variant="h6">Ledger (outstanding)</Typography>
-          <Stack direction="row" spacing={2} sx={{ my: 1 }}>
+          <Typography variant="h6">Ledger</Typography>
+          <Stack direction="row" spacing={2} sx={{ my: 1 }} flexWrap="wrap" useFlexGap>
+            <Chip
+              variant="outlined"
+              label={`Opening ₹${ledgerQ.data?.opening_balance ?? "0.00"} ${
+                ledgerQ.data?.opening_balance_side ?? ""
+              }`}
+            />
             <Chip color="primary" label={`Receivable ₹${ledgerQ.data?.receivable ?? "0.00"}`} />
             <Chip label={`Payable ₹${ledgerQ.data?.payable ?? "0.00"}`} />
             <Chip color="secondary" variant="outlined" label={`Net ₹${ledgerQ.data?.net_balance ?? "0.00"}`} />
+            <Chip
+              variant="outlined"
+              label={`Credit limit ${
+                ledgerQ.data?.credit_limit ? `₹${ledgerQ.data.credit_limit}` : "none"
+              }`}
+            />
+            {ledgerQ.data?.credit_available != null && (
+              <Chip
+                color={Number(ledgerQ.data.credit_available) < 0 ? "error" : "success"}
+                label={`Available ₹${ledgerQ.data.credit_available}`}
+              />
+            )}
           </Stack>
           <Divider sx={{ my: 1 }} />
           {(ledgerQ.data?.entries ?? []).map((e) => (

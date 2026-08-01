@@ -18,7 +18,9 @@ from app.modules.parties.schemas import (
     PartyCreate,
     PartyDetail,
     PartyLedgerOut,
+    PartyListItem,
     PartyOut,
+    PartyUpdate,
     TagAssignIn,
     TagRef,
 )
@@ -50,13 +52,50 @@ async def create(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
 
-@router.get("", response_model=list[PartyOut])
+@router.get("", response_model=list[PartyListItem])
 async def list_(
     q: str | None = None,
+    party_type: str | None = None,
+    area: str | None = None,
+    is_active: bool | None = None,
+    serving_branch_id: int | None = None,
+    tag_id: int | None = None,
+    sort: str = "created",
+    direction: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
     principal: Principal = Depends(_read()),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_parties(session, principal, q)
+    return await service.list_parties(
+        session, principal, q,
+        party_type=party_type, area=area, is_active=is_active,
+        serving_branch_id=serving_branch_id, tag_id=tag_id,
+        sort=sort, direction=direction, limit=limit, offset=offset,
+    )
+
+
+@router.get("/areas", response_model=list[str])
+async def areas(
+    principal: Principal = Depends(_read()),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_areas(session, principal)
+
+
+@router.put("/{party_id}", response_model=PartyOut)
+async def update(
+    party_id: int,
+    payload: PartyUpdate,
+    principal: Principal = Depends(_write()),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.update_party(session, principal, party_id, payload)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
 
 @router.get("/{party_id}", response_model=PartyDetail)

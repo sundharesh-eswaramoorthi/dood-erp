@@ -8,12 +8,38 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class PartyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    area: str = Field(min_length=1, max_length=120)          # v2 §1: required
     party_type: str = Field(default="customer", pattern="^(customer|supplier|both)$")
     gstin: str | None = Field(default=None, max_length=20)
     phone: str | None = Field(default=None, max_length=20)
     pan: str | None = Field(default=None, max_length=20)
     credit_limit: Decimal | None = None
-    branch_id: int | None = None
+    opening_balance: Decimal = Field(default=Decimal(0), ge=0)
+    opening_balance_side: str = Field(default="receivable", pattern="^(receivable|payable)$")
+    opening_as_of: dt.date | None = None
+    is_active: bool = True
+    serving_branch_id: int | None = None
+
+
+class PartyUpdate(BaseModel):
+    """All fields optional — only what is sent is changed (v2 §1 "Edit party").
+
+    Changing the opening balance re-posts it to the ledger as a reversal plus a
+    fresh entry; the ledger stays append-only.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    area: str | None = Field(default=None, min_length=1, max_length=120)
+    party_type: str | None = Field(default=None, pattern="^(customer|supplier|both)$")
+    gstin: str | None = Field(default=None, max_length=20)
+    phone: str | None = Field(default=None, max_length=20)
+    pan: str | None = Field(default=None, max_length=20)
+    credit_limit: Decimal | None = None
+    opening_balance: Decimal | None = Field(default=None, ge=0)
+    opening_balance_side: str | None = Field(default=None, pattern="^(receivable|payable)$")
+    opening_as_of: dt.date | None = None
+    is_active: bool | None = None
+    serving_branch_id: int | None = None
 
 
 class PartyOut(BaseModel):
@@ -22,12 +48,25 @@ class PartyOut(BaseModel):
     id: int
     party_code: str
     name: str
+    area: str
     party_type: str
     gstin: str | None
     phone: str | None
     pan: str | None
     credit_limit: Decimal | None
-    branch_id: int
+    opening_balance: Decimal
+    opening_balance_side: str
+    opening_as_of: dt.date | None
+    is_active: bool
+    serving_branch_id: int
+
+
+class PartyListItem(PartyOut):
+    """List row carries live outstanding so the grid can sort/filter on it."""
+
+    net_balance: Decimal = Decimal(0)
+    receivable: Decimal = Decimal(0)
+    payable: Decimal = Decimal(0)
 
 
 # ---- contacts ----
@@ -36,6 +75,7 @@ class ContactCreate(BaseModel):
     phone: str | None = Field(default=None, max_length=20)
     email: str | None = Field(default=None, max_length=160)
     designation: str | None = Field(default=None, max_length=80)
+    relationship: str | None = Field(default=None, max_length=80)  # v2 §1
     is_primary: bool = False
 
 
@@ -47,6 +87,7 @@ class ContactOut(BaseModel):
     phone: str | None
     email: str | None
     designation: str | None
+    relationship: str | None
     is_primary: bool
 
 
@@ -157,7 +198,13 @@ class LedgerEntryOut(BaseModel):
 
 
 class PartyLedgerOut(BaseModel):
+    """v2 §1 Party Ledger: opening, current, credit limit, outstanding, txns."""
+
     party_id: int
+    opening_balance: Decimal
+    opening_balance_side: str
+    credit_limit: Decimal | None
+    credit_available: Decimal | None
     net_balance: Decimal
     receivable: Decimal
     payable: Decimal

@@ -4,21 +4,54 @@ export interface Party {
   id: number;
   party_code: string;
   name: string;
+  area: string;
   party_type: string;
   gstin: string | null;
   phone: string | null;
   pan: string | null;
   credit_limit: string | null;
-  branch_id: number;
+  opening_balance: string;
+  opening_balance_side: string;
+  opening_as_of: string | null;
+  is_active: boolean;
+  serving_branch_id: number;
+}
+
+/** List rows carry live outstanding so the grid can show/sort on it. */
+export interface PartyListItem extends Party {
+  net_balance: string;
+  receivable: string;
+  payable: string;
 }
 
 export interface PartyCreate {
   name: string;
+  area: string;
   party_type: string;
   gstin?: string | null;
   phone?: string | null;
   pan?: string | null;
   credit_limit?: string | null;
+  opening_balance?: string;
+  opening_balance_side?: string;
+  opening_as_of?: string | null;
+  is_active?: boolean;
+  serving_branch_id?: number | null;
+}
+
+export type PartyUpdate = Partial<PartyCreate>;
+
+export interface PartyFilters {
+  q?: string;
+  party_type?: string;
+  area?: string;
+  is_active?: boolean;
+  serving_branch_id?: number;
+  tag_id?: number;
+  sort?: string;
+  direction?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
 }
 
 export interface Contact {
@@ -27,6 +60,7 @@ export interface Contact {
   phone: string | null;
   email: string | null;
   designation: string | null;
+  relationship: string | null;
   is_primary: boolean;
 }
 
@@ -84,8 +118,21 @@ export interface Activity {
   items: ActivityItem[];
 }
 
-export async function listParties(q?: string): Promise<Party[]> {
-  const { data } = await api.get<Party[]>("/api/v1/parties", { params: q ? { q } : {} });
+export async function listParties(filters: PartyFilters = {}): Promise<PartyListItem[]> {
+  const params = Object.fromEntries(
+    Object.entries(filters).filter(([, v]) => v !== undefined && v !== "" && v !== null),
+  );
+  const { data } = await api.get<PartyListItem[]>("/api/v1/parties", { params });
+  return data;
+}
+
+export async function listAreas(): Promise<string[]> {
+  const { data } = await api.get<string[]>("/api/v1/parties/areas");
+  return data;
+}
+
+export async function updateParty(id: number, payload: PartyUpdate): Promise<Party> {
+  const { data } = await api.put<Party>(`/api/v1/parties/${id}`, payload);
   return data;
 }
 
@@ -103,7 +150,14 @@ export async function getParty(id: number): Promise<PartyDetail> {
 
 export async function addContact(
   id: number,
-  payload: { name: string; phone?: string; email?: string; designation?: string; is_primary?: boolean },
+  payload: {
+    name: string;
+    phone?: string;
+    email?: string;
+    designation?: string;
+    relationship?: string;
+    is_primary?: boolean;
+  },
 ): Promise<Contact> {
   const { data } = await api.post<Contact>(`/api/v1/parties/${id}/contacts`, payload);
   return data;
@@ -166,6 +220,10 @@ export interface LedgerEntry {
 }
 export interface PartyLedger {
   party_id: number;
+  opening_balance: string;
+  opening_balance_side: string;
+  credit_limit: string | null;
+  credit_available: string | null;
   net_balance: string;
   receivable: string;
   payable: string;

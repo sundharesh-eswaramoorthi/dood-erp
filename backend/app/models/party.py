@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Numeric, String, func
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -14,14 +14,21 @@ class Party(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     org_id: Mapped[int] = mapped_column(BigInteger, index=True)
-    branch_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    # v2: the editable "Current Serving Branch", NOT an RLS boundary — parties
+    # are org-wide so every branch sees them (v2 §9 "all branch parties").
+    serving_branch_id: Mapped[int] = mapped_column(BigInteger, index=True)
     party_code: Mapped[str] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200))
+    area: Mapped[str] = mapped_column(String(120), default="")
     party_type: Mapped[str] = mapped_column(String(20), default="customer")
     gstin: Mapped[str | None] = mapped_column(String(20), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     pan: Mapped[str | None] = mapped_column(String(20), nullable=True)
     credit_limit: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    opening_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal(0))
+    opening_balance_side: Mapped[str] = mapped_column(String(12), default="receivable")
+    opening_as_of: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -37,6 +44,7 @@ class PartyContact(Base):
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     email: Mapped[str | None] = mapped_column(String(160), nullable=True)
     designation: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    relationship: Mapped[str | None] = mapped_column(String(80), nullable=True)
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
