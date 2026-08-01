@@ -8,6 +8,7 @@ from app.modules.activity.router import router as activity_router
 from app.modules.auth.router import router as auth_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.health.router import router as health_router
+from app.modules.money.router import router as money_router
 from app.modules.parties.router import router as parties_router
 from app.modules.products.router import router as products_router
 from app.modules.purchase.router import router as purchase_router
@@ -45,6 +46,7 @@ app.include_router(reports_router, prefix="/api/v1/reports", tags=["reports"])
 app.include_router(users_router, prefix="/api/v1", tags=["users"])
 app.include_router(settings_router, prefix="/api/v1", tags=["settings"])
 app.include_router(activity_router, prefix="/api/v1/activity", tags=["activity"])
+app.include_router(money_router, prefix="/api/v1", tags=["money"])
 
 
 @app.get("/")

@@ -72,14 +72,22 @@ async def ctx(migrated_db):
                  "VALUES (:o,:b,'C1','Cust','Central',1) RETURNING id"),
             {"o": org, "b": branch},
         )).scalar_one()
+        account = (await s.execute(
+            text("INSERT INTO cash_bank_account (org_id, branch_id, name, account_type, opening_balance, "
+                 "current_balance) VALUES (:o,:b,'Cash','cash',0,0) RETURNING id"),
+            {"o": org, "b": branch},
+        )).scalar_one()
         from app.services.numbering import current_fin_year
         fy = current_fin_year()
-        for doc_type, prefix in [("sale_order", "SO-"), ("delivery", "DLV-"), ("sales_bill", "SB-")]:
+        for doc_type, prefix in [("sale_order", "SO-"), ("delivery", "DLV-"), ("sales_bill", "SB-"),
+                                 ("sales_return", "SR-"), ("purchase_bill", "PB-"),
+                                 ("purchase_return", "PR-")]:
             await s.execute(
                 text("INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
                      "VALUES (:o, NULL, :d, :fy, :px, 4)"),
                 {"o": org, "d": doc_type, "fy": fy, "px": prefix},
             )
         await s.commit()
-        yield {"s": s, "org": org, "branch": branch, "godown": g1, "godown2": g2, "unit": unit, "product": prod, "party": party}
+        yield {"s": s, "org": org, "branch": branch, "godown": g1, "godown2": g2, "unit": unit,
+               "product": prod, "party": party, "account": account}
     await engine.dispose()

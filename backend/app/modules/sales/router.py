@@ -45,6 +45,18 @@ async def list_orders(
     return await service.list_orders(session, principal)
 
 
+@router.get("/orders/{order_id}", response_model=SaleOrderOut)
+async def get_order(
+    order_id: int,
+    principal: Principal = Depends(require_permission("sales.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.get_order(session, order_id)
+    except Exception:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
+
+
 @router.post("/orders/{order_id}/cancel", response_model=SaleOrderOut)
 async def cancel_order(
     order_id: int,
@@ -140,9 +152,8 @@ async def bill_order(
     principal: Principal = Depends(require_permission("sales.create")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    supply = (payload.supply_type if payload else "intra")
     try:
-        return await service.bill_order(session, principal, order_id, supply)
+        return await service.bill_order(session, principal, order_id, payload)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Order not found")
     except (OverSell, CreditLimitExceeded) as e:

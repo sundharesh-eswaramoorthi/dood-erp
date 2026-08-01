@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.modules.shared import MoneyHeaderIn, MoneyLineIn, MoneyLineOut, MoneyTotalsOut
+
 
 class OrderLineIn(BaseModel):
     product_id: int
@@ -26,6 +28,8 @@ class OrderLineOut(BaseModel):
     line_no: int
     product_id: int
     godown_id: int
+    entered_qty: Decimal
+    entered_unit_id: int
     base_qty: Decimal
     rate: Decimal
 
@@ -67,37 +71,32 @@ class DeliveryOut(BaseModel):
 
 
 # ---- sales bill (from an order) ----
-class BillOrderIn(BaseModel):
+class BillOrderIn(MoneyHeaderIn):
+    """The order supplies the lines; this supplies the v2 §4 money block."""
+
     supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
 
 
-class SalesBillLineOut(BaseModel):
-    line_no: int
-    product_id: int
-    base_qty: Decimal
+class SalesBillLineOut(MoneyLineOut):
     moved_qty: Decimal
-    taxable: Decimal
-    cgst: Decimal
-    sgst: Decimal
-    igst: Decimal
     cogs_amount: Decimal
-    line_total: Decimal
 
 
-class SalesBillOut(BaseModel):
+class SalesBillOut(MoneyTotalsOut):
     id: int
     doc_no: str | None
     status: str
     customer_id: int
-    taxable_total: Decimal
-    tax_total: Decimal
+    supply_type: str
+    price_mode: str
+    bill_date: dt.date
+    doc_datetime: dt.datetime | None = None
     cogs_total: Decimal
-    grand_total: Decimal
     lines: list[SalesBillLineOut]
 
 
 # ---- sales return ----
-class SalesReturnLineIn(BaseModel):
+class SalesReturnLineIn(MoneyLineIn):
     product_id: int
     entered_qty: Decimal = Field(gt=0)
     entered_unit_id: int
@@ -105,20 +104,23 @@ class SalesReturnLineIn(BaseModel):
     gst_rate: Decimal | None = None
 
 
-class SalesReturnCreate(BaseModel):
+class SalesReturnCreate(MoneyHeaderIn):
     customer_id: int
-    godown_id: int
+    godown_id: int | None = None
     branch_id: int | None = None
     orig_bill_id: int | None = None
+    return_date: dt.date | None = None
     supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     lines: list[SalesReturnLineIn] = Field(min_length=1)
 
 
-class SalesReturnOut(BaseModel):
+class SalesReturnOut(MoneyTotalsOut):
     id: int
     doc_no: str | None
     status: str
     customer_id: int
-    taxable_total: Decimal
-    tax_total: Decimal
-    grand_total: Decimal
+    supply_type: str
+    price_mode: str
+    return_date: dt.date
+    doc_datetime: dt.datetime | None = None
+    lines: list[MoneyLineOut]

@@ -211,7 +211,7 @@ async def test_bill_after_delivery_moves_no_stock(ctx):
     posts NO stock — only the receivable + COGS. Goods move exactly once total."""
     from app.core.deps import Principal
     from app.modules.sales import service as sales
-    from app.modules.sales.schemas import OrderLineIn, SaleOrderCreate
+    from app.modules.sales.schemas import BillOrderIn, OrderLineIn, SaleOrderCreate
 
     s, org, branch, godown, product, party, unit = (
         ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
@@ -226,7 +226,7 @@ async def test_bill_after_delivery_moves_no_stock(ctx):
     on_hand_after_delivery, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
     assert on_hand_after_delivery == Decimal(80)  # 100 - 20
 
-    binfo = await sales.bill_order(s, prin, order["id"], "intra")
+    binfo = await sales.bill_order(s, prin, order["id"], BillOrderIn())
     await s.commit()
     on_hand_after_bill, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
     assert on_hand_after_bill == Decimal(80), "bill must NOT move already-delivered stock"
@@ -244,7 +244,7 @@ async def test_bill_without_delivery_is_the_mover(ctx):
     (counter-sale) — it moves the stock and records fulfilment."""
     from app.core.deps import Principal
     from app.modules.sales import service as sales
-    from app.modules.sales.schemas import OrderLineIn, SaleOrderCreate
+    from app.modules.sales.schemas import BillOrderIn, OrderLineIn, SaleOrderCreate
 
     s, org, branch, godown, product, party, unit = (
         ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
@@ -254,7 +254,7 @@ async def test_bill_without_delivery_is_the_mover(ctx):
     order = await sales.create_order(s, prin, SaleOrderCreate(
         customer_id=party, lines=[OrderLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(15), entered_unit_id=unit, rate=Decimal(50))]))
     await s.commit()
-    binfo = await sales.bill_order(s, prin, order["id"], "intra")  # no delivery -> bill moves it
+    binfo = await sales.bill_order(s, prin, order["id"], BillOrderIn())  # no delivery -> bill moves it
     await s.commit()
     on_hand, reserved = await _on_hand_and_reserved(s, org, product, branch, godown)
     assert on_hand == Decimal(85), "bill must move stock when nothing delivered it"
@@ -274,4 +274,158 @@ async def test_ledger_is_append_only(ctx):
     with pytest.raises(Exception):
         await s.execute(text("UPDATE stock_movement_ledger SET signed_qty = 999 WHERE org_id=:o"), {"o": org})
         await s.commit()
+    await s.rollback()
+
+
+# ---------------------------------------------------------------------------
+# v2 §3/§4 money model
+# ---------------------------------------------------------------------------
+async def _account_balance(s, org, account):
+    return Decimal((await s.execute(text(
+        "SELECT current_balance FROM cash_bank_account WHERE org_id=:o AND id=:a"),
+        {"o": org, "a": account})).scalar_one())
+
+
+async def _account_ledger_net(s, org, account):
+    return Decimal((await s.execute(text(
+        "SELECT COALESCE(SUM(CASE direction WHEN 'in' THEN amount ELSE -amount END),0) "
+        "FROM account_ledger_entry WHERE org_id=:o AND account_id=:a"),
+        {"o": org, "a": account})).scalar_one())
+
+
+async def test_purchase_bill_money_model_reaches_the_ledger(ctx):
+    """T12: line discount + overall discount + card charges + round off all
+    land on the supplier's payable, and the discounted price (not the list
+    price) is what enters the moving-average cost."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import BillLineIn, PurchaseBillCreate
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+
+    bill = await purchase.post_bill(s, prin, PurchaseBillCreate(
+        supplier_id=party, godown_id=godown, supply_type="intra",
+        discount_amount=Decimal("190"), card_charges=Decimal("10"),
+        lines=[
+            BillLineIn(product_id=product, entered_qty=Decimal(10), entered_unit_id=unit,
+                       rate=Decimal(100), gst_rate=Decimal(5), discount_pct=Decimal(10)),
+            BillLineIn(product_id=product, entered_qty=Decimal(5), entered_unit_id=unit,
+                       rate=Decimal(200), gst_rate=Decimal(5)),
+        ],
+    ))
+    await s.commit()
+
+    # line 1: 1000 gross - 100 line disc - 90 alloc = 810 taxable, 40.50 tax
+    # line 2: 1000 gross -   0 line disc - 100 alloc = 900 taxable, 45.00 tax
+    assert bill["lines"][0]["taxable"] == Decimal("810.00")
+    assert bill["lines"][1]["taxable"] == Decimal("900.00")
+    assert bill["taxable_total"] == Decimal("1710.00")
+    assert bill["tax_total"] == Decimal("85.50")
+    assert bill["discount_amount"] == Decimal("190.00")
+    # 1795.50 + 10 card = 1805.50 -> rounds to 1806.00
+    assert bill["round_off"] == Decimal("0.50")
+    assert bill["grand_total"] == Decimal("1806.00")
+    assert bill["balance_amount"] == Decimal("1806.00")
+
+    # the payable equals the invoice exactly
+    assert await _party_net(s, org, party) == Decimal("-1806.00")  # credit = we owe
+
+    # cost carried into inventory is the POST-discount taxable per base unit
+    wac = await eng.current_wac(s, org, product, branch)
+    # (810 + 900) / 15 units = 114.00
+    assert wac.quantize(Decimal("0.01")) == Decimal("114.00")
+
+    on_hand, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == Decimal(15)
+    assert on_hand == await _ledger_sum(s, org, product, branch, godown)
+
+
+async def test_paid_at_bill_time_settles_party_and_cash(ctx):
+    """T13: money handed over when the invoice is raised must move BOTH the
+    party balance and the cash account, or the receivable overstates reality."""
+    from app.core.deps import Principal
+    from app.modules.sales import service as sales
+    from app.modules.sales.schemas import BillOrderIn, OrderLineIn, SaleOrderCreate
+
+    s, org, branch, godown, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _prep(ctx)
+
+    order = await sales.create_order(s, prin, SaleOrderCreate(
+        customer_id=party,
+        lines=[OrderLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(10),
+                           entered_unit_id=unit, rate=Decimal(50))]))
+    await s.commit()
+    bill = await sales.bill_order(s, prin, order["id"], BillOrderIn(
+        paid_amount=Decimal("200"), payment_account_id=account))
+    await s.commit()
+
+    assert bill["grand_total"] == Decimal("500.00")
+    assert bill["paid_amount"] == Decimal("200.00")
+    assert bill["balance_amount"] == Decimal("300.00")
+
+    # receivable is the UNPAID part, not the whole invoice
+    assert await _party_net(s, org, party) == Decimal("300.00")
+    # the cash actually arrived, and the account invariant still holds
+    assert await _account_balance(s, org, account) == Decimal("200.00")
+    assert await _account_balance(s, org, account) == await _account_ledger_net(s, org, account)
+
+
+async def test_multi_godown_invoice_splits_stock_per_line(ctx):
+    """T14: v2's "multi godown invoice" — one bill receiving into two godowns
+    must land the right qty in each, with T1 holding per godown."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import BillLineIn, PurchaseBillCreate
+
+    s, org, branch, g1, g2, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["godown2"],
+        ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+
+    await purchase.post_bill(s, prin, PurchaseBillCreate(
+        supplier_id=party, godown_id=g1,
+        lines=[
+            BillLineIn(product_id=product, godown_id=g1, entered_qty=Decimal(10),
+                       entered_unit_id=unit, rate=Decimal(10)),
+            BillLineIn(product_id=product, godown_id=g2, entered_qty=Decimal(7),
+                       entered_unit_id=unit, rate=Decimal(10)),
+        ],
+    ))
+    await s.commit()
+
+    oh1, _ = await _on_hand_and_reserved(s, org, product, branch, g1)
+    oh2, _ = await _on_hand_and_reserved(s, org, product, branch, g2)
+    assert oh1 == Decimal(10) and oh2 == Decimal(7)
+    assert oh1 == await _ledger_sum(s, org, product, branch, g1)
+    assert oh2 == await _ledger_sum(s, org, product, branch, g2)
+
+
+async def test_line_godown_must_belong_to_the_branch(ctx):
+    """A line can't ship goods into some other branch's godown."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import BillLineIn, PurchaseBillCreate
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+
+    other_branch = (await s.execute(
+        text("INSERT INTO branch (org_id, name) VALUES (:o,'B2') RETURNING id"), {"o": org})).scalar_one()
+    foreign = (await s.execute(
+        text("INSERT INTO godown (org_id, branch_id, name) VALUES (:o,:b,'GX') RETURNING id"),
+        {"o": org, "b": other_branch})).scalar_one()
+    await s.commit()
+
+    with pytest.raises(ValueError):
+        await purchase.post_bill(s, prin, PurchaseBillCreate(
+            supplier_id=party, godown_id=godown,
+            lines=[BillLineIn(product_id=product, godown_id=foreign, entered_qty=Decimal(1),
+                              entered_unit_id=unit, rate=Decimal(10))],
+        ))
     await s.rollback()

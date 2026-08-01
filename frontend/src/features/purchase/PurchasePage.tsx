@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   CardContent,
+  Divider,
   MenuItem,
   Stack,
   Table,
@@ -17,6 +18,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { listAccounts } from "../accounts/api";
+import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
+import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
 import { listProducts } from "../products/api";
 import { getFeatureFlags } from "../settings/api";
@@ -34,6 +38,23 @@ import {
 
 const EMPTY = { supplier: "", godown: "", supply_type: "intra", product: "", qty: "", rate: "", gst: "" };
 
+/** One editable invoice line (v2 §3: godown, qty, rate, discount, HSN, remarks). */
+interface DraftLine {
+  product: string;
+  godown: string;
+  qty: string;
+  rate: string;
+  gst: string;
+  discount_pct: string;
+  hsn: string;
+  remarks: string;
+}
+
+const EMPTY_LINE: DraftLine = {
+  product: "", godown: "", qty: "", rate: "", gst: "",
+  discount_pct: "", hsn: "", remarks: "",
+};
+
 export function PurchasePage() {
   const qc = useQueryClient();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
@@ -42,8 +63,11 @@ export function PurchasePage() {
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const bills = useQuery({ queryKey: ["purchase-bills"], queryFn: listBills });
 
+  const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const [f, setF] = useState(EMPTY);
   const [r, setR] = useState(EMPTY);
+  const [lines, setLines] = useState<DraftLine[]>([{ ...EMPTY_LINE }]);
+  const [mny, setMny] = useState<MoneyHeader>({ ...EMPTY_MONEY });
   const [msg, setMsg] = useState<string | null>(null);
   const flags = useQuery({ queryKey: ["feature-flags"], queryFn: getFeatureFlags });
   const orders = useQuery({ queryKey: ["purchase-orders"], queryFn: listOrders, enabled: !!flags.data?.purchase_order });
@@ -51,10 +75,6 @@ export function PurchasePage() {
   useEffect(() => {
     if (godowns.data?.length && !f.godown) setF((s) => ({ ...s, godown: String(godowns.data![0].id) }));
     if (parties.data?.length && !f.supplier) setF((s) => ({ ...s, supplier: String(parties.data![0].id) }));
-    if (products.data?.length && !f.product) {
-      const p = products.data![0];
-      setF((s) => ({ ...s, product: String(p.id), gst: p.gst_rate ?? "" }));
-    }
     if (godowns.data?.length && parties.data?.length && products.data?.length && !r.supplier) {
       const p = products.data![0];
       setR((s) => ({
@@ -65,10 +85,28 @@ export function PurchasePage() {
         gst: p.gst_rate ?? "",
       }));
     }
-  }, [godowns.data, parties.data, products.data, f.godown, f.supplier, f.product, r.supplier]);
+  }, [godowns.data, parties.data, products.data, f.godown, f.supplier, r.supplier]);
 
   const baseUnitOf = (pid: number) => products.data?.find((p) => p.id === pid)?.base_unit_id ?? 0;
   const partyName = (id: number) => parties.data?.find((p) => p.id === id)?.name ?? id;
+
+  const filled = lines.filter((l) => l.product && l.qty && l.rate);
+
+  // Totals come from the server's money engine so the preview and the posted
+  // document can never disagree.
+  const preview = useQuery({
+    queryKey: ["money-preview", filled, mny, f.supply_type],
+    queryFn: () =>
+      previewMoney(
+        filled.map((l) => ({ qty: l.qty, rate: l.rate, gst_rate: l.gst, discount_pct: l.discount_pct })),
+        mny,
+        f.supply_type,
+      ),
+    enabled: filled.length > 0,
+  });
+
+  const setLine = (i: number, patch: Partial<DraftLine>) =>
+    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
 
   const create = useMutation({
     mutationFn: () =>
@@ -76,25 +114,33 @@ export function PurchasePage() {
         supplier_id: Number(f.supplier),
         godown_id: Number(f.godown),
         supply_type: f.supply_type,
-        lines: [
-          {
-            product_id: Number(f.product),
-            entered_qty: f.qty,
-            entered_unit_id: baseUnitOf(Number(f.product)),
-            rate: f.rate,
-            gst_rate: f.gst || undefined,
-          },
-        ],
+        ...moneyPayload(mny),
+        lines: filled.map((l) => ({
+          product_id: Number(l.product),
+          godown_id: Number(l.godown || f.godown),
+          entered_qty: l.qty,
+          entered_unit_id: baseUnitOf(Number(l.product)),
+          rate: l.rate,
+          gst_rate: l.gst || undefined,
+          discount_pct: l.discount_pct || undefined,
+          hsn_code: l.hsn || undefined,
+          remarks: l.remarks || undefined,
+        })),
       }),
     onSuccess: (b) => {
-      setMsg(`Posted ${b.doc_no}: grand total ₹${b.grand_total} (tax ₹${b.tax_total}) → supplier payable`);
-      setF({ ...f, qty: "", rate: "" });
+      setMsg(
+        `Posted ${b.doc_no}: grand total ₹${b.grand_total}` +
+          (Number(b.paid_amount ?? 0) ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}` : ""),
+      );
+      setLines([{ ...EMPTY_LINE }]);
+      setMny({ ...EMPTY_MONEY });
       qc.invalidateQueries({ queryKey: ["purchase-bills"] });
       qc.invalidateQueries({ queryKey: ["stock-current"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: unknown) => {
       const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Bill failed");
+      setMsg(typeof d === "string" ? d : "Bill failed");
     },
   });
 
@@ -149,7 +195,7 @@ export function PurchasePage() {
             component="form"
             onSubmit={(e) => {
               e.preventDefault();
-              if (f.supplier && f.godown && f.product && f.qty && f.rate) create.mutate();
+              if (f.supplier && filled.length) create.mutate();
             }}
           >
             <Stack spacing={2}>
@@ -159,33 +205,86 @@ export function PurchasePage() {
                     <MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>
                   ))}
                 </TextField>
-                <TextField label="Godown" select value={f.godown} onChange={(e) => setF({ ...f, godown: e.target.value })} sx={{ width: 170 }}>
+                <TextField label="Default godown" select value={f.godown} onChange={(e) => setF({ ...f, godown: e.target.value })} sx={{ width: 190 }} helperText="lines can override">
                   {(godowns.data ?? []).map((g) => (
                     <MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>
                   ))}
                 </TextField>
-                <TextField label="Supply" select value={f.supply_type} onChange={(e) => setF({ ...f, supply_type: e.target.value })} sx={{ width: 150 }}>
+                <TextField label="Supply" select value={f.supply_type} onChange={(e) => setF({ ...f, supply_type: e.target.value })} sx={{ width: 170 }}>
                   <MenuItem value="intra">Intra (CGST+SGST)</MenuItem>
                   <MenuItem value="inter">Inter (IGST)</MenuItem>
                 </TextField>
               </Stack>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center">
-                <TextField label="Product" select value={f.product} onChange={(e) => { const gst = products.data?.find((p) => p.id === Number(e.target.value))?.gst_rate ?? ""; setF({ ...f, product: e.target.value, gst }); }} sx={{ flex: 1, minWidth: 200 }}>
-                  {(products.data ?? []).map((p) => (
-                    <MenuItem key={p.id} value={String(p.id)}>{p.code} · {p.name}</MenuItem>
-                  ))}
-                </TextField>
-                <TextField label="Qty" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} sx={{ width: 100 }} />
-                <TextField label="Rate" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} sx={{ width: 120 }} />
-                <TextField label="GST %" value={f.gst} onChange={(e) => setF({ ...f, gst: e.target.value })} sx={{ width: 100 }} />
-                <Button type="submit" variant="contained" sx={{ height: 56 }} disabled={create.isPending}>
-                  Post bill
+
+              <Divider textAlign="left">
+                <Typography variant="caption" color="text.secondary">Lines</Typography>
+              </Divider>
+
+              {lines.map((l, i) => (
+                <Stack key={i} direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <TextField
+                    size="small" label="Product" select value={l.product}
+                    onChange={(e) => {
+                      const p = products.data?.find((pp) => pp.id === Number(e.target.value));
+                      setLine(i, { product: e.target.value, gst: p?.gst_rate ?? "", hsn: p?.hsn_code ?? "" });
+                    }}
+                    sx={{ flex: 1, minWidth: 180 }}
+                  >
+                    {(products.data ?? []).map((p) => (
+                      <MenuItem key={p.id} value={String(p.id)}>{p.code} · {p.name}</MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField size="small" label="Godown" select value={l.godown || f.godown}
+                    onChange={(e) => setLine(i, { godown: e.target.value })} sx={{ width: 150 }}>
+                    {(godowns.data ?? []).map((g) => (
+                      <MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField size="small" label="Qty" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} sx={{ width: 85 }} />
+                  <TextField size="small" label="Rate" value={l.rate} onChange={(e) => setLine(i, { rate: e.target.value })} sx={{ width: 100 }} />
+                  <TextField size="small" label="Disc %" value={l.discount_pct} onChange={(e) => setLine(i, { discount_pct: e.target.value })} sx={{ width: 85 }} />
+                  <TextField size="small" label="GST %" value={l.gst} onChange={(e) => setLine(i, { gst: e.target.value })} sx={{ width: 85 }} />
+                  <TextField size="small" label="HSN" value={l.hsn} onChange={(e) => setLine(i, { hsn: e.target.value })} sx={{ width: 100 }} />
+                  <TextField size="small" label="Remarks" value={l.remarks} onChange={(e) => setLine(i, { remarks: e.target.value })} sx={{ width: 140 }} />
+                  <Button
+                    size="small" color="inherit"
+                    disabled={lines.length === 1}
+                    onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
+                  >
+                    ✕
+                  </Button>
+                </Stack>
+              ))}
+              <Box>
+                <Button size="small" onClick={() => setLines((ls) => [...ls, { ...EMPTY_LINE }])}>
+                  + Add line
                 </Button>
+              </Box>
+
+              <Divider textAlign="left">
+                <Typography variant="caption" color="text.secondary">Discounts, charges & payment</Typography>
+              </Divider>
+
+              <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
+                <Box sx={{ flex: 1 }}>
+                  <MoneyFields value={mny} onChange={setMny} accounts={accounts.data ?? []} />
+                </Box>
+                <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1 }}>
+                  <MoneyTotalsPanel totals={preview.data?.totals} />
+                  <Button
+                    type="submit" variant="contained" fullWidth sx={{ mt: 2 }}
+                    disabled={create.isPending || !filled.length || !f.supplier}
+                  >
+                    Post bill
+                  </Button>
+                </Box>
               </Stack>
             </Stack>
           </Box>
           <Typography variant="caption" color="text.secondary">
-            Posting adds stock (moving-average) and credits the supplier's ledger (payable) in one transaction.
+            Each line receives into its own godown. Posting adds stock at the post-discount
+            cost (moving-average), credits the supplier, and pays out anything entered as
+            "Paid now" — all in one transaction.
           </Typography>
         </CardContent>
       </Card>

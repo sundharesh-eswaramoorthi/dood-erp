@@ -5,6 +5,11 @@ import {
   Card,
   CardContent,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Divider,
   MenuItem,
   Stack,
   Table,
@@ -18,6 +23,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { listAccounts } from "../accounts/api";
+import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
+import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
 import { listProducts } from "../products/api";
 import { getCurrentStock, listGodowns } from "../stock/api";
@@ -26,6 +34,7 @@ import {
   cancelOrder,
   createOrder,
   deliverOrder,
+  getOrder,
   listBills,
   listOrders,
   type SaleOrder,
@@ -49,6 +58,8 @@ export function SalesPage() {
 
   const [f, setF] = useState(EMPTY);
   const [msg, setMsg] = useState<string | null>(null);
+  const [billing, setBilling] = useState<number | null>(null);
+  const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
 
   useEffect(() => {
     if (parties.data?.length && !f.customer) setF((s) => ({ ...s, customer: String(parties.data![0].id) }));
@@ -109,15 +120,22 @@ export function SalesPage() {
   });
 
   const bill = useMutation({
-    mutationFn: (id: number) => billOrder(id),
+    mutationFn: (args: { id: number; money: Record<string, unknown>; supply: string }) =>
+      billOrder(args.id, args.money, args.supply),
     onSuccess: (b) => {
-      setMsg(`Billed ${b.doc_no}: ₹${b.grand_total} to receivable (COGS ₹${b.cogs_total}). Delivered goods → no extra stock movement.`);
+      setMsg(
+        `Billed ${b.doc_no}: ₹${b.grand_total} (COGS ₹${b.cogs_total})` +
+          (Number(b.paid_amount ?? 0) ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}` : "") +
+          ". Delivered goods → no extra stock movement.",
+      );
+      setBilling(null);
       qc.invalidateQueries({ queryKey: ["sales-bills"] });
       qc.invalidateQueries({ queryKey: ["stock-current"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: unknown) => {
       const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Billing failed");
+      setMsg(typeof d === "string" ? d : "Billing failed");
     },
   });
 
@@ -198,7 +216,7 @@ export function SalesPage() {
                       </>
                     )}
                     {o.status === "delivered" && (
-                      <Button size="small" onClick={() => bill.mutate(o.id)} disabled={bill.isPending}>
+                      <Button size="small" onClick={() => setBilling(o.id)} disabled={bill.isPending}>
                         Bill
                       </Button>
                     )}
@@ -251,6 +269,95 @@ export function SalesPage() {
           </Table>
         </CardContent>
       </Card>
+
+      <BillDialog
+        orderId={billing}
+        accounts={accounts.data ?? []}
+        products={products.data ?? []}
+        posting={bill.isPending}
+        onClose={() => setBilling(null)}
+        onPost={(money, supply) => billing && bill.mutate({ id: billing, money, supply })}
+      />
     </Stack>
+  );
+}
+
+/** v2 §4: the order supplies the lines, this collects the money block and
+ *  shows server-computed totals before the invoice is posted. */
+function BillDialog({
+  orderId,
+  accounts,
+  products,
+  posting,
+  onClose,
+  onPost,
+}: {
+  orderId: number | null;
+  accounts: { id: number; name: string }[];
+  products: { id: number; gst_rate: string | null }[];
+  posting: boolean;
+  onClose: () => void;
+  onPost: (money: Record<string, unknown>, supply: string) => void;
+}) {
+  const [mny, setMny] = useState<MoneyHeader>({ ...EMPTY_MONEY });
+  const [supply, setSupply] = useState("intra");
+
+  const order = useQuery({
+    queryKey: ["sale-order", orderId],
+    queryFn: () => getOrder(orderId!),
+    enabled: orderId != null,
+  });
+
+  const previewLines = (order.data?.lines ?? []).map((l) => ({
+    qty: l.entered_qty,
+    rate: l.rate,
+    gst_rate: products.find((p) => p.id === l.product_id)?.gst_rate ?? "0",
+  }));
+
+  const preview = useQuery({
+    queryKey: ["money-preview", previewLines, mny, supply],
+    queryFn: () => previewMoney(previewLines, mny, supply),
+    enabled: previewLines.length > 0,
+  });
+
+  return (
+    <Dialog open={orderId != null} onClose={onClose} fullWidth maxWidth="md">
+      <DialogTitle>Bill order {order.data?.doc_no ?? ""}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <Stack direction="row" spacing={2} alignItems="center">
+            <TextField
+              size="small" label="Supply" select value={supply}
+              onChange={(e) => setSupply(e.target.value)} sx={{ width: 190 }}
+            >
+              <MenuItem value="intra">Intra (CGST+SGST)</MenuItem>
+              <MenuItem value="inter">Inter (IGST)</MenuItem>
+            </TextField>
+            <Typography variant="body2" color="text.secondary">
+              {previewLines.length} line{previewLines.length === 1 ? "" : "s"} from the order
+            </Typography>
+          </Stack>
+          <Divider />
+          <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
+            <Box sx={{ flex: 1 }}>
+              <MoneyFields value={mny} onChange={setMny} accounts={accounts} compact />
+            </Box>
+            <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1 }}>
+              <MoneyTotalsPanel totals={preview.data?.totals} />
+            </Box>
+          </Stack>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={posting || !previewLines.length}
+          onClick={() => onPost(moneyPayload(mny), supply)}
+        >
+          Post bill
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

@@ -5,53 +5,49 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field
 
+from app.modules.shared import MoneyHeaderIn, MoneyLineIn, MoneyLineOut, MoneyTotalsOut
 
-class BillLineIn(BaseModel):
+
+class BillLineIn(MoneyLineIn):
     product_id: int
     entered_qty: Decimal = Field(gt=0)
     entered_unit_id: int
-    rate: Decimal = Field(ge=0)              # ex-tax price per entered unit
+    rate: Decimal = Field(ge=0)              # price per ENTERED unit
     gst_rate: Decimal | None = None          # falls back to product.gst_rate
 
 
-class PurchaseBillCreate(BaseModel):
+class PurchaseBillCreate(MoneyHeaderIn):
     supplier_id: int
-    godown_id: int
+    godown_id: int | None = None             # default godown for lines that omit one
     branch_id: int | None = None
     supplier_invoice_no: str | None = None
+    po_id: int | None = None                 # v2 §3 "PO number"
     supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     bill_date: dt.date | None = None
     lines: list[BillLineIn] = Field(min_length=1)
 
 
-class BillLineOut(BaseModel):
-    line_no: int
-    product_id: int
-    base_qty: Decimal
-    rate: Decimal
-    taxable: Decimal
-    gst_rate: Decimal
-    cgst: Decimal
-    sgst: Decimal
-    igst: Decimal
-    line_total: Decimal
+class BillLineOut(MoneyLineOut):
+    pass
 
 
-class PurchaseBillOut(BaseModel):
+class PurchaseBillOut(MoneyTotalsOut):
     id: int
     doc_no: str | None
     status: str
     supplier_id: int
-    taxable_total: Decimal
-    tax_total: Decimal
-    grand_total: Decimal
+    supply_type: str
+    price_mode: str
+    bill_date: dt.date
+    doc_datetime: dt.datetime | None = None
+    po_id: int | None = None
     lines: list[BillLineOut]
 
 
 # ---- returns ----
-class PurchaseReturnCreate(BaseModel):
+class PurchaseReturnCreate(MoneyHeaderIn):
     supplier_id: int
-    godown_id: int
+    godown_id: int | None = None
     branch_id: int | None = None
     orig_bill_id: int | None = None
     supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
@@ -59,14 +55,15 @@ class PurchaseReturnCreate(BaseModel):
     lines: list[BillLineIn] = Field(min_length=1)
 
 
-class PurchaseReturnOut(BaseModel):
+class PurchaseReturnOut(MoneyTotalsOut):
     id: int
     doc_no: str | None
     status: str
     supplier_id: int
-    taxable_total: Decimal
-    tax_total: Decimal
-    grand_total: Decimal
+    supply_type: str
+    price_mode: str
+    return_date: dt.date
+    doc_datetime: dt.datetime | None = None
     lines: list[BillLineOut]
 
 

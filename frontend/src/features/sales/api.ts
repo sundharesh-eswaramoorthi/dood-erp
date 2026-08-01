@@ -23,6 +23,21 @@ export async function listOrders(): Promise<SaleOrder[]> {
   return data;
 }
 
+export interface SaleOrderLine {
+  line_no: number;
+  product_id: number;
+  godown_id: number;
+  entered_qty: string;
+  entered_unit_id: number;
+  base_qty: string;
+  rate: string;
+}
+
+export async function getOrder(id: number): Promise<SaleOrder & { lines: SaleOrderLine[] }> {
+  const { data } = await api.get<SaleOrder & { lines: SaleOrderLine[] }>(`/api/v1/sales/orders/${id}`);
+  return data;
+}
+
 export async function cancelOrder(id: number): Promise<SaleOrder> {
   const { data } = await api.post<SaleOrder>(`/api/v1/sales/orders/${id}/cancel`);
   return data;
@@ -44,11 +59,30 @@ export interface SalesBill {
   grand_total: string;
 }
 
+export interface BilledOut {
+  doc_no: string | null;
+  grand_total: string;
+  cogs_total: string;
+  taxable_total: string;
+  tax_total: string;
+  paid_amount: string;
+  balance_amount: string;
+  round_off: string;
+  discount_amount: string;
+}
+
+/** `money` carries the v2 §4 block (discounts, charges, paid) — the order
+ *  supplies the lines, so only the header needs filling in here. */
 export async function billOrder(
   id: number,
-): Promise<{ doc_no: string | null; grand_total: string; cogs_total: string; taxable_total: string; tax_total: string }> {
-  const { data } = await api.post(`/api/v1/sales/orders/${id}/bill`, { supply_type: "intra" });
-  return data as never;
+  money: Record<string, unknown> = {},
+  supplyType = "intra",
+): Promise<BilledOut> {
+  const { data } = await api.post(`/api/v1/sales/orders/${id}/bill`, {
+    supply_type: supplyType,
+    ...money,
+  });
+  return data as BilledOut;
 }
 
 export async function listBills(): Promise<SalesBill[]> {
