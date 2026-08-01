@@ -8,10 +8,12 @@ from app.modules.purchase import service
 from app.modules.purchase.schemas import (
     PurchaseBillCreate,
     PurchaseBillOut,
+    PurchaseBillWithWarnings,
     PurchaseOrderCreate,
     PurchaseOrderOut,
     PurchaseReturnCreate,
     PurchaseReturnOut,
+    ReceivePOIn,
 )
 
 router = APIRouter()
@@ -77,3 +79,51 @@ async def list_orders(
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.list_po(session, principal)
+
+
+@router.get("/orders/{po_id}", response_model=PurchaseOrderOut)
+async def get_order(
+    po_id: int,
+    principal: Principal = Depends(require_permission("purchase.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.get_po(session, po_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
+
+
+@router.post(
+    "/orders/{po_id}/receive",
+    response_model=PurchaseBillWithWarnings,
+    status_code=status.HTTP_201_CREATED,
+)
+async def receive_order(
+    po_id: int,
+    payload: ReceivePOIn | None = None,
+    principal: Principal = Depends(require_permission("purchase.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    """Raise the purchase bill for a PO. Over-receipt warns, it does not block."""
+    try:
+        return await service.receive_po(session, principal, po_id, payload or ReceivePOIn())
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+
+@router.post("/orders/{po_id}/cancel", response_model=PurchaseOrderOut)
+async def cancel_order(
+    po_id: int,
+    principal: Principal = Depends(require_permission("purchase.create")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.cancel_po(session, principal, po_id)
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Purchase order not found")
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))

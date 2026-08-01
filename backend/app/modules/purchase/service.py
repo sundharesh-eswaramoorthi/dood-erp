@@ -20,9 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import Principal
 from app.models.party import Party
 from app.modules.purchase.schemas import (
+    BillLineIn,
     PurchaseBillCreate,
     PurchaseOrderCreate,
     PurchaseReturnCreate,
+    ReceivePOIn,
 )
 from app.services import doc_money, money
 from app.services import stock_engine as eng
@@ -111,15 +113,16 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
                 "INSERT INTO purchase_bill_line (org_id, bill_id, line_no, product_id, godown_id, "
                 "entered_qty, entered_unit_id, base_qty, rate, hsn_code, remarks, gross_amount, "
                 "discount_pct, discount_amount, header_discount_alloc, taxable, gst_rate, "
-                "cgst, sgst, igst, line_total) "
+                "cgst, sgst, igst, line_total, po_line_no) "
                 "VALUES (:o,:bid,:ln,:p,:g,:eq,:eu,:bq,:rt,:hsn,:rm,:gross,:dpct,:damt,:halloc,"
-                ":tx,:gr,:cg,:sg,:ig,:lt)"
+                ":tx,:gr,:cg,:sg,:ig,:lt,:poln)"
             ),
             {"o": principal.org_id, "bid": bill_id, "ln": i, "p": line.product_id, "g": godown_id,
              "eq": line.entered_qty, "eu": line.entered_unit_id, "bq": base, "rt": line.rate,
              "hsn": hsn, "rm": line.remarks, "gross": m.gross, "dpct": line.discount_pct or 0,
              "damt": m.discount, "halloc": m.header_discount_alloc, "tx": m.taxable,
-             "gr": m.gst_rate, "cg": m.cgst, "sg": m.sgst, "ig": m.igst, "lt": m.line_total},
+             "gr": m.gst_rate, "cg": m.cgst, "sg": m.sgst, "ig": m.igst, "lt": m.line_total,
+             "poln": line.po_line_no},
         )
         out_lines.append({
             "line_no": i, "product_id": line.product_id, "godown_id": godown_id,
@@ -128,7 +131,7 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
             "gross_amount": m.gross, "discount_amount": m.discount,
             "header_discount_alloc": m.header_discount_alloc, "taxable": m.taxable,
             "gst_rate": m.gst_rate, "cgst": m.cgst, "sgst": m.sgst, "igst": m.igst,
-            "line_total": m.line_total,
+            "line_total": m.line_total, "po_line_no": line.po_line_no,
         })
 
     await doc_money.write_totals(session, "purchase_bill", bill_id, t)
@@ -284,38 +287,263 @@ async def create_po(session: AsyncSession, principal: Principal, data: PurchaseO
     branch_id = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
     if branch_id is None or branch_id not in principal.branch_ids:
         raise PermissionError("Branch not permitted")
+
+    # A PO moves no stock, but it is priced exactly like the bill it becomes.
+    computed = money.compute(
+        await _money_inputs(session, data.lines),
+        supply_type=data.supply_type, price_mode=data.price_mode,
+        header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
+        card_charges=data.card_charges, round_off=data.round_off,
+        paid_amount=data.advance_amount,     # validated as "not more than the order"
+    )
+    t = computed.totals
+    order_date = data.order_date or dt.date.today()
+
     number = await allocate(session, principal.org_id, None, "purchase_order")
     po_id = (
         await session.execute(
             text(
-                "INSERT INTO purchase_order (org_id, branch_id, supplier_id, doc_no, order_date, "
-                "expected_date, note, created_by) VALUES (:o,:b,:s,:no,:od,:ed,:nt,:by) RETURNING id"
+                "INSERT INTO purchase_order (org_id, branch_id, supplier_id, godown_id, doc_no, "
+                "order_date, expected_date, doc_datetime, supply_type, price_mode, discount_pct, "
+                "note, remarks, payment_account_id, created_by) "
+                "VALUES (:o,:b,:s,:g,:no,:od,:ed,COALESCE(:dts, now()),:st,:pm,:dp,:nt,:rm,:pa,:by) "
+                "RETURNING id"
             ),
-            {"o": principal.org_id, "b": branch_id, "s": data.supplier_id, "no": number,
-             "od": data.order_date or dt.date.today(), "ed": data.expected_date, "nt": data.note,
+            {"o": principal.org_id, "b": branch_id, "s": data.supplier_id, "g": data.godown_id,
+             "no": number, "od": order_date, "ed": data.expected_date, "dts": data.doc_datetime,
+             "st": data.supply_type, "pm": data.price_mode, "dp": data.discount_pct,
+             "nt": data.note, "rm": data.remarks, "pa": data.payment_account_id,
              "by": principal.user_id},
         )
     ).scalar_one()
-    for i, line in enumerate(data.lines, start=1):
+
+    for i, (line, m) in enumerate(zip(data.lines, computed.lines), start=1):
+        godown_id = line.godown_id or data.godown_id
+        if godown_id is not None:
+            godown_id = await doc_money.resolve_godown(session, branch_id, godown_id, None)
+        base = await eng.to_base(session, line.product_id, line.entered_qty, line.entered_unit_id)
+        hsn = line.hsn_code or await doc_money.product_hsn(session, line.product_id)
         await session.execute(
             text(
-                "INSERT INTO purchase_order_line (org_id, po_id, line_no, product_id, entered_qty, "
-                "entered_unit_id, rate) VALUES (:o,:po,:ln,:p,:eq,:eu,:rt)"
+                "INSERT INTO purchase_order_line (org_id, po_id, line_no, product_id, godown_id, "
+                "entered_qty, entered_unit_id, base_qty, rate, hsn_code, remarks, gross_amount, "
+                "discount_pct, discount_amount, header_discount_alloc, taxable, gst_rate, "
+                "cgst, sgst, igst, line_total) "
+                "VALUES (:o,:po,:ln,:p,:g,:eq,:eu,:bq,:rt,:hsn,:rm,:gross,:dpct,:damt,:halloc,"
+                ":tx,:gr,:cg,:sg,:ig,:lt)"
             ),
-            {"o": principal.org_id, "po": po_id, "ln": i, "p": line.product_id,
-             "eq": line.entered_qty, "eu": line.entered_unit_id, "rt": line.rate},
+            {"o": principal.org_id, "po": po_id, "ln": i, "p": line.product_id, "g": godown_id,
+             "eq": line.entered_qty, "eu": line.entered_unit_id, "bq": base, "rt": line.rate,
+             "hsn": hsn, "rm": line.remarks, "gross": m.gross, "dpct": line.discount_pct or 0,
+             "damt": m.discount, "halloc": m.header_discount_alloc, "tx": m.taxable,
+             "gr": m.gst_rate, "cg": m.cgst, "sg": m.sgst, "ig": m.igst, "lt": m.line_total},
         )
-    return {"id": po_id, "doc_no": number, "status": "open", "supplier_id": data.supplier_id}
+
+    await session.execute(
+        text(
+            "UPDATE purchase_order SET gross_total=:gr, line_discount_total=:ld, discount_amount=:hd, "
+            "taxable_total=:tx, tax_total=:tax, card_charges=:cc, round_off=:ro, grand_total=:gt, "
+            "advance_amount=:adv, balance_amount=:bal WHERE id=:i"
+        ),
+        {"gr": t.gross_total, "ld": t.line_discount_total, "hd": t.header_discount,
+         "tx": t.taxable_total, "tax": t.tax_total, "cc": t.card_charges, "ro": t.round_off,
+         "gt": t.grand_total, "adv": t.paid_amount, "bal": t.balance_amount, "i": po_id},
+    )
+
+    # An advance is real cash leaving before any goods arrive, so the supplier
+    # owes us until they deliver: DEBIT the party, money OUT of the account.
+    await doc_money.settle_at_post(
+        session, org_id=principal.org_id, branch_id=branch_id, party_id=data.supplier_id,
+        account_id=data.payment_account_id, doc_type="purchase_order", doc_id=po_id,
+        amount=t.paid_amount, effective_date=order_date, created_by=principal.user_id,
+        party_side="debit", account_direction="out",
+    )
+    await emit(session, principal.org_id, "purchase.order",
+               {"po_id": po_id, "supplier_id": data.supplier_id, "grand_total": str(t.grand_total),
+                "advance": str(t.paid_amount)})
+    return await get_po(session, po_id)
+
+
+async def get_po(session: AsyncSession, po_id: int) -> dict:
+    hdr = (
+        await session.execute(text("SELECT * FROM purchase_order WHERE id=:i"), {"i": po_id})
+    ).mappings().one_or_none()
+    if hdr is None:
+        raise LookupError("Purchase order not found")
+    lines = (
+        await session.execute(
+            text(
+                "SELECT line_no, product_id, godown_id, entered_qty, entered_unit_id, base_qty, "
+                "received_qty, rate, hsn_code, remarks, gross_amount, discount_amount, "
+                "header_discount_alloc, taxable, gst_rate, cgst, sgst, igst, line_total "
+                "FROM purchase_order_line WHERE po_id=:i ORDER BY line_no"
+            ),
+            {"i": po_id},
+        )
+    ).mappings().all()
+    out = dict(hdr)
+    out["lines"] = [
+        {**dict(r), "pending_qty": max(Decimal(r["base_qty"]) - Decimal(r["received_qty"]), Decimal(0))}
+        for r in lines
+    ]
+    return out
 
 
 async def list_po(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
     rows = (
         await session.execute(
-            text("SELECT id, doc_no, supplier_id, order_date, status FROM purchase_order ORDER BY id DESC LIMIT :l"),
+            text(
+                "SELECT id, doc_no, supplier_id, order_date, expected_date, status, "
+                "grand_total, advance_amount, balance_amount "
+                "FROM purchase_order ORDER BY id DESC LIMIT :l"
+            ),
             {"l": limit},
         )
     ).mappings().all()
-    return [dict(r) for r in rows]
+    # money as decimal strings, like every other endpoint — a float would render
+    # "1050" where the document itself shows "1050.00"
+    money_cols = ("grand_total", "advance_amount", "balance_amount")
+    return [{k: (str(v) if k in money_cols and v is not None else v) for k, v in r.items()} for r in rows]
+
+
+async def po_tolerance_pct(session: AsyncSession, org_id: int) -> Decimal:
+    """Decision #10: over-receipt warns but is allowed; the threshold is a
+    setting (`purchase.po_tolerance_pct`), defaulting to 10%."""
+    raw = (
+        await session.execute(
+            text("SELECT value->>'pct' FROM system_setting WHERE org_id=:o AND key='purchase.po_tolerance_pct'"),
+            {"o": org_id},
+        )
+    ).scalar_one_or_none()
+    try:
+        return Decimal(raw) if raw is not None else Decimal(10)
+    except Exception:  # noqa: BLE001 — a bad setting must not block receiving
+        return Decimal(10)
+
+
+async def receive_po(
+    session: AsyncSession, principal: Principal, po_id: int, data: ReceivePOIn
+) -> dict:
+    """Convert a PO into a purchase bill (v2 §3 "PO number" on the bill).
+
+    Defaults to receiving everything still pending. Receiving more than ordered
+    (beyond the tolerance) is warned about, not blocked — decision #10.
+    """
+    po = await get_po(session, po_id)
+    if po["status"] == "cancelled":
+        raise ValueError("Purchase order is cancelled")
+    if po["status"] == "closed":
+        raise ValueError("Purchase order is already fully received")
+
+    pending = {ln["line_no"]: ln for ln in po["lines"]}
+
+    if data.lines is None:
+        # receive the whole outstanding balance, in the ordered units
+        lines: list[BillLineIn] = []
+        for ln in po["lines"]:
+            if ln["pending_qty"] <= 0:
+                continue
+            # pending is in base units; convert back to the ordered unit so the
+            # rate (which is per entered unit) still applies
+            factor = Decimal(ln["base_qty"]) / Decimal(ln["entered_qty"]) if ln["entered_qty"] else Decimal(1)
+            entered = (Decimal(ln["pending_qty"]) / factor) if factor else Decimal(0)
+            lines.append(
+                BillLineIn(
+                    product_id=ln["product_id"], godown_id=ln["godown_id"],
+                    entered_qty=entered, entered_unit_id=ln["entered_unit_id"],
+                    rate=ln["rate"], gst_rate=ln["gst_rate"],
+                    hsn_code=ln["hsn_code"], remarks=ln["remarks"],
+                    po_line_no=ln["line_no"],
+                )
+            )
+        if not lines:
+            raise ValueError("Nothing left to receive on this purchase order")
+    else:
+        lines = data.lines
+
+    bill = await post_bill(
+        session, principal,
+        PurchaseBillCreate(
+            supplier_id=po["supplier_id"],
+            godown_id=po["godown_id"],
+            branch_id=po["branch_id"],
+            supplier_invoice_no=data.supplier_invoice_no,
+            po_id=po_id,
+            supply_type=data.supply_type or po["supply_type"],
+            bill_date=data.bill_date,
+            price_mode=data.price_mode,
+            discount_pct=data.discount_pct,
+            discount_amount=data.discount_amount,
+            card_charges=data.card_charges,
+            round_off=data.round_off,
+            paid_amount=data.paid_amount,
+            payment_account_id=data.payment_account_id,
+            remarks=data.remarks,
+            doc_datetime=data.doc_datetime,
+            lines=lines,
+        ),
+    )
+
+    # Roll the received quantities back onto the PO. Each bill line names the PO
+    # line it satisfies; matching on product_id alone would credit the wrong
+    # line whenever a PO carries the same product twice.
+    tolerance = await po_tolerance_pct(session, principal.org_id)
+    warnings: list[str] = []
+    for bl in bill["lines"]:
+        match = pending.get(bl.get("po_line_no"))
+        if match is None:
+            # caller sent a line without a po_line_no: fall back to the product,
+            # but only when that is unambiguous
+            same_product = [ln for ln in pending.values() if ln["product_id"] == bl["product_id"]]
+            if len(same_product) == 1:
+                match = same_product[0]
+            elif len(same_product) > 1:
+                warnings.append(
+                    f"Product {bl['product_id']} appears on {len(same_product)} lines of this "
+                    "order — send po_line_no to say which one was received"
+                )
+                continue
+            else:
+                warnings.append(
+                    f"Product {bl['product_id']} was received but is not on this purchase order"
+                )
+                continue
+
+        received = Decimal(match["received_qty"]) + Decimal(bl["base_qty"])
+        ordered = Decimal(match["base_qty"])
+        limit = ordered * (1 + tolerance / 100)
+        if received > limit:
+            warnings.append(
+                f"Line {match['line_no']}: received {received} against {ordered} ordered "
+                f"(over the {tolerance}% tolerance)"
+            )
+        match["received_qty"] = received
+        await session.execute(
+            text("UPDATE purchase_order_line SET received_qty=:q WHERE po_id=:po AND line_no=:ln"),
+            {"q": received, "po": po_id, "ln": match["line_no"]},
+        )
+
+    fully = all(Decimal(ln["received_qty"]) >= Decimal(ln["base_qty"]) for ln in pending.values())
+    new_status = "closed" if fully else "partial"
+    await session.execute(
+        text("UPDATE purchase_order SET status=:s WHERE id=:i"), {"s": new_status, "i": po_id}
+    )
+    await emit(session, principal.org_id, "purchase.order.received",
+               {"po_id": po_id, "bill_id": bill["id"], "status": new_status,
+                "warnings": warnings})
+    return {**bill, "warnings": warnings}
+
+
+async def cancel_po(session: AsyncSession, principal: Principal, po_id: int) -> dict:
+    po = await get_po(session, po_id)
+    if po["status"] == "closed":
+        raise ValueError("A fully received purchase order cannot be cancelled")
+    if any(Decimal(ln["received_qty"]) > 0 for ln in po["lines"]):
+        raise ValueError("Goods have already been received against this order")
+    await session.execute(
+        text("UPDATE purchase_order SET status='cancelled' WHERE id=:i"), {"i": po_id}
+    )
+    return await get_po(session, po_id)
 
 
 async def list_bills(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:

@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   CardContent,
+  Chip,
   Divider,
   MenuItem,
   Stack,
@@ -27,11 +28,13 @@ import { getFeatureFlags } from "../settings/api";
 import { listGodowns } from "../stock/api";
 import { listUnits } from "../units/api";
 import {
+  cancelOrder,
   createBill,
   createOrder,
   createReturn,
   listBills,
   listOrders,
+  receiveOrder,
   type PurchaseBill,
   type PurchaseOrder,
 } from "./api";
@@ -165,17 +168,65 @@ export function PurchasePage() {
     },
   });
 
-  const [po, setPo] = useState({ product: "", qty: "", rate: "" });
+  const [po, setPo] = useState({
+    product: "", qty: "", rate: "", gst: "", expected: "", advance: "", account: "",
+  });
   const doPO = useMutation({
     mutationFn: () =>
       createOrder({
         supplier_id: Number(r.supplier || f.supplier),
-        lines: [{ product_id: Number(po.product || f.product), entered_qty: po.qty, entered_unit_id: baseUnitOf(Number(po.product || f.product)), rate: po.rate || "0" }],
+        godown_id: Number(f.godown) || undefined,
+        expected_date: po.expected || null,
+        advance_amount: po.advance || "0",
+        payment_account_id: po.advance ? Number(po.account) || undefined : undefined,
+        lines: [{
+          product_id: Number(po.product || f.product),
+          entered_qty: po.qty,
+          entered_unit_id: baseUnitOf(Number(po.product || f.product)),
+          rate: po.rate || "0",
+          gst_rate: po.gst || undefined,
+        }],
       }),
     onSuccess: (o) => {
-      setMsg(`PO ${o.doc_no} created`);
-      setPo({ product: "", qty: "", rate: "" });
+      setMsg(
+        `PO ${o.doc_no} created: ₹${o.grand_total}` +
+          (Number(o.advance_amount ?? 0) ? ` · advance ₹${o.advance_amount} paid` : ""),
+      );
+      setPo({ ...po, product: "", qty: "", rate: "", advance: "" });
       qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(typeof d === "string" ? d : "PO failed");
+    },
+  });
+
+  // Receiving a PO raises the bill for everything still pending. Over-receipt
+  // is warned about, not blocked (decision #10).
+  const receivePO = useMutation({
+    mutationFn: (id: number) => receiveOrder(id),
+    onSuccess: (b) => {
+      const warn = b.warnings?.length ? ` — ${b.warnings.join("; ")}` : "";
+      setMsg(`Posted ${b.doc_no} against the PO: ₹${b.grand_total}${warn}`);
+      qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+      qc.invalidateQueries({ queryKey: ["purchase-bills"] });
+      qc.invalidateQueries({ queryKey: ["stock-current"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(typeof d === "string" ? d : "Receive failed");
+    },
+  });
+  const cancelPO = useMutation({
+    mutationFn: (id: number) => cancelOrder(id),
+    onSuccess: () => {
+      setMsg("Purchase order cancelled");
+      qc.invalidateQueries({ queryKey: ["purchase-orders"] });
+    },
+    onError: (e: unknown) => {
+      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setMsg(typeof d === "string" ? d : "Cancel failed");
     },
   });
 
@@ -345,22 +396,83 @@ export function PurchasePage() {
                 if ((po.product || f.product) && po.qty) doPO.mutate();
               }}
             >
-              <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }}>
-                <TextField label="Product" select value={po.product || f.product} onChange={(e) => setPo({ ...po, product: e.target.value })} sx={{ minWidth: 200 }}>
+              <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
+                <TextField label="Product" select value={po.product || f.product}
+                  onChange={(e) => {
+                    const p = products.data?.find((pp) => pp.id === Number(e.target.value));
+                    setPo({ ...po, product: e.target.value, gst: p?.gst_rate ?? "", rate: p?.purchase_price ?? po.rate });
+                  }} sx={{ minWidth: 200 }}>
                   {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
                 </TextField>
                 <TextField label="Qty" value={po.qty} onChange={(e) => setPo({ ...po, qty: e.target.value })} sx={{ width: 100 }} />
-                <TextField label="Rate" value={po.rate} onChange={(e) => setPo({ ...po, rate: e.target.value })} sx={{ width: 100 }} />
+                <TextField label="Rate" value={po.rate} onChange={(e) => setPo({ ...po, rate: e.target.value })} sx={{ width: 110 }} />
+                <TextField label="GST %" value={po.gst} onChange={(e) => setPo({ ...po, gst: e.target.value })} sx={{ width: 95 }} />
+                <TextField label="Expected" type="date" InputLabelProps={{ shrink: true }}
+                  value={po.expected} onChange={(e) => setPo({ ...po, expected: e.target.value })} sx={{ width: 170 }} />
+                <TextField label="Advance" value={po.advance}
+                  onChange={(e) => setPo({ ...po, advance: e.target.value })} sx={{ width: 110 }}
+                  helperText="paid up front" />
+                <TextField label="From account" select value={po.account}
+                  onChange={(e) => setPo({ ...po, account: e.target.value })}
+                  sx={{ width: 170 }} disabled={!po.advance}>
+                  {(accounts.data ?? []).map((a) => (<MenuItem key={a.id} value={String(a.id)}>{a.name}</MenuItem>))}
+                </TextField>
                 <Button type="submit" variant="contained" disabled={doPO.isPending}>Create PO</Button>
               </Stack>
             </Box>
-            <Stack spacing={0.5}>
-              {(orders.data ?? []).map((o: PurchaseOrder) => (
-                <Typography key={o.id} variant="body2">
-                  <code>{o.doc_no}</code> · {partyName(o.supplier_id)} · {o.status}
-                </Typography>
-              ))}
-            </Stack>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Doc</TableCell>
+                  <TableCell>Supplier</TableCell>
+                  <TableCell>Expected</TableCell>
+                  <TableCell align="right">Total</TableCell>
+                  <TableCell align="right">Advance</TableCell>
+                  <TableCell align="right">Balance</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell align="right">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(orders.data ?? []).map((o: PurchaseOrder) => (
+                  <TableRow key={o.id}>
+                    <TableCell><code>{o.doc_no}</code></TableCell>
+                    <TableCell>{partyName(o.supplier_id)}</TableCell>
+                    <TableCell>{o.expected_date || "—"}</TableCell>
+                    <TableCell align="right">₹{o.grand_total ?? "0.00"}</TableCell>
+                    <TableCell align="right">₹{o.advance_amount ?? "0.00"}</TableCell>
+                    <TableCell align="right">₹{o.balance_amount ?? "0.00"}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={o.status}
+                        color={o.status === "closed" ? "success" : o.status === "cancelled" ? "default" : "warning"} />
+                    </TableCell>
+                    <TableCell align="right">
+                      <Button size="small" variant="outlined"
+                        disabled={receivePO.isPending || o.status === "closed" || o.status === "cancelled"}
+                        onClick={() => receivePO.mutate(o.id)}>
+                        Receive
+                      </Button>
+                      <Button size="small" color="inherit"
+                        disabled={cancelPO.isPending || o.status === "closed" || o.status === "cancelled"}
+                        onClick={() => cancelPO.mutate(o.id)}>
+                        Cancel
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {(orders.data ?? []).length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8}>
+                      <Typography color="text.secondary">No purchase orders yet.</Typography>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            <Typography variant="caption" color="text.secondary">
+              "Receive" raises the purchase bill for everything still pending and moves the stock.
+              Receiving more than ordered is allowed but warns (tolerance is a setting).
+            </Typography>
           </CardContent>
         </Card>
       )}

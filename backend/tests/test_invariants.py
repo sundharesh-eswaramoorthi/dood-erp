@@ -429,3 +429,113 @@ async def test_line_godown_must_belong_to_the_branch(ctx):
                               entered_unit_id=unit, rate=Decimal(10))],
         ))
     await s.rollback()
+
+
+# ---------------------------------------------------------------------------
+# v2 §3 purchase orders
+# ---------------------------------------------------------------------------
+async def _enable_po(s, org):
+    await s.execute(
+        text("INSERT INTO system_setting (org_id, key, value) VALUES (:o,'feature.purchase_order',"
+             "'{\"enabled\": true}'::jsonb) ON CONFLICT DO NOTHING"),
+        {"o": org},
+    )
+    await s.commit()
+
+
+async def test_po_receipt_credits_the_right_line(ctx):
+    """T15: a PO may carry the SAME product on several lines (different rates,
+    godowns or lots). Receipts must credit the line they name — matching on
+    product_id alone credits the first one twice and the order never closes."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import POLineIn, PurchaseOrderCreate, ReceivePOIn
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _enable_po(s, org)
+
+    po = await purchase.create_po(s, prin, PurchaseOrderCreate(
+        supplier_id=party, godown_id=godown,
+        lines=[
+            POLineIn(product_id=product, entered_qty=Decimal(10), entered_unit_id=unit, rate=Decimal(100)),
+            POLineIn(product_id=product, entered_qty=Decimal(5), entered_unit_id=unit, rate=Decimal(200)),
+        ],
+    ))
+    await s.commit()
+
+    result = await purchase.receive_po(s, prin, po["id"], ReceivePOIn())
+    await s.commit()
+
+    assert result["warnings"] == [], f"clean receipt should not warn: {result['warnings']}"
+    after = await purchase.get_po(s, po["id"])
+    assert [Decimal(l["received_qty"]) for l in after["lines"]] == [Decimal(10), Decimal(5)]
+    assert after["status"] == "closed"
+
+    # and it cannot be received a second time
+    with pytest.raises(ValueError):
+        await purchase.receive_po(s, prin, po["id"], ReceivePOIn())
+    await s.rollback()
+
+
+async def test_po_over_receipt_warns_but_allows(ctx):
+    """T16: decision #10 — receiving more than ordered is a warning, not a
+    block; the goods still land in stock."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import BillLineIn, POLineIn, PurchaseOrderCreate, ReceivePOIn
+
+    s, org, branch, godown, product, party, unit = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"], ctx["party"], ctx["unit"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _enable_po(s, org)
+
+    po = await purchase.create_po(s, prin, PurchaseOrderCreate(
+        supplier_id=party, godown_id=godown,
+        lines=[POLineIn(product_id=product, entered_qty=Decimal(10), entered_unit_id=unit, rate=Decimal(50))],
+    ))
+    await s.commit()
+
+    result = await purchase.receive_po(s, prin, po["id"], ReceivePOIn(
+        lines=[BillLineIn(product_id=product, godown_id=godown, entered_qty=Decimal(20),
+                          entered_unit_id=unit, rate=Decimal(50), po_line_no=1)],
+    ))
+    await s.commit()
+
+    assert any("tolerance" in w for w in result["warnings"]), result["warnings"]
+    on_hand, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == Decimal(20), "the goods must still be received"
+    assert on_hand == await _ledger_sum(s, org, product, branch, godown)
+
+
+async def test_po_advance_moves_party_and_cash(ctx):
+    """T17: an advance is real cash leaving before any goods arrive, so the
+    supplier owes us: party DEBIT + account OUT."""
+    from app.core.deps import Principal
+    from app.modules.purchase import service as purchase
+    from app.modules.purchase.schemas import POLineIn, PurchaseOrderCreate
+
+    s, org, branch, godown, product, party, unit, account = (
+        ctx["s"], ctx["org"], ctx["branch"], ctx["godown"], ctx["product"],
+        ctx["party"], ctx["unit"], ctx["account"])
+    prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
+    await _enable_po(s, org)
+
+    po = await purchase.create_po(s, prin, PurchaseOrderCreate(
+        supplier_id=party, godown_id=godown,
+        advance_amount=Decimal(300), payment_account_id=account,
+        lines=[POLineIn(product_id=product, entered_qty=Decimal(10), entered_unit_id=unit, rate=Decimal(100))],
+    ))
+    await s.commit()
+
+    assert Decimal(po["grand_total"]) == Decimal("1000.00")
+    assert Decimal(po["advance_amount"]) == Decimal("300.00")
+    assert Decimal(po["balance_amount"]) == Decimal("700.00")
+    # a PO moves no stock
+    on_hand, _ = await _on_hand_and_reserved(s, org, product, branch, godown)
+    assert on_hand == 0
+    # but the cash really left, and the supplier owes us for it
+    assert await _party_net(s, org, party) == Decimal("300.00")
+    assert await _account_balance(s, org, account) == Decimal("-300.00")
+    assert await _account_balance(s, org, account) == await _account_ledger_net(s, org, account)
