@@ -9,6 +9,7 @@ import { AccountsPage } from "./features/accounts/AccountsPage";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { LoginPage } from "./features/auth/LoginPage";
 import { PartiesPage } from "./features/parties/PartiesPage";
+import { PrintPage } from "./features/printing/PrintPage";
 import { PartyDetailPage } from "./features/parties/PartyDetailPage";
 import { ProductsPage } from "./features/products/ProductsPage";
 import { PurchasePage } from "./features/purchase/PurchasePage";
@@ -29,6 +30,15 @@ export default function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            {/* outside the Layout on purpose: the print view is the paper */}
+            <Route
+              path="/print/:docType/:docId"
+              element={
+                <ProtectedRoute>
+                  <PrintPage />
+                </ProtectedRoute>
+              }
+            />
             <Route
               element={
                 <ProtectedRoute>

@@ -134,3 +134,29 @@ def test_rejects_impossible_figures():
         money.compute([line(1, 100)], paid_amount=D("500"))   # paid > total
     with pytest.raises(money.MoneyError):
         money.compute([])                                     # no lines
+
+
+# ---------------------------------------------------------------------------
+# v2 §9 amount in words (Indian numbering)
+# ---------------------------------------------------------------------------
+def test_amount_in_words_uses_indian_grouping():
+    """Lakh and crore, not million — 12,34,567 rather than 1,234,567. Getting
+    the grouping wrong is immediately visible to whoever receives the invoice."""
+    from app.services.printing import amount_in_words as w
+
+    assert w(D("1234567")) == "Rupees Twelve Lakh Thirty Four Thousand Five Hundred Sixty Seven Only"
+    assert w(D("123456")) == "Rupees One Lakh Twenty Three Thousand Four Hundred Fifty Six Only"
+    assert w(D("12345678")).startswith("Rupees One Crore Twenty Three Lakh")
+    assert w(D("100000")) == "Rupees One Lakh Only"
+
+
+def test_amount_in_words_handles_paise_and_edges():
+    from app.services.printing import amount_in_words as w
+
+    assert w(D("0")) == "Rupees Zero Only"
+    assert w(D("589.50")) == "Rupees Five Hundred Eighty Nine and Fifty Paise Only"
+    assert w(D("1050.00")) == "Rupees One Thousand Fifty Only"
+    assert w(D("100000.05")) == "Rupees One Lakh and Five Paise Only"
+    # a paise value that rounds up must carry into the rupees
+    assert w(D("9.999")) == "Rupees Ten Only"
+    assert w(D("-25.50")).startswith("Minus Rupees Twenty Five")

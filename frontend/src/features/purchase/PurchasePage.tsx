@@ -489,6 +489,7 @@ export function PurchasePage() {
                 <TableCell>Supplier</TableCell>
                 <TableCell align="right">Grand total</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell align="right">Print</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -498,11 +499,19 @@ export function PurchasePage() {
                   <TableCell>{partyName(b.supplier_id)}</TableCell>
                   <TableCell align="right">₹{b.grand_total}</TableCell>
                   <TableCell>{b.status}</TableCell>
+                  <TableCell align="right">
+                    <Button
+                      size="small"
+                      onClick={() => window.open(`/print/purchase_bill/${b.id}`, "_blank")}
+                    >
+                      Print
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
               {(bills.data ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4}>
+                  <TableCell colSpan={5}>
                     <Typography color="text.secondary">No bills yet.</Typography>
                   </TableCell>
                 </TableRow>

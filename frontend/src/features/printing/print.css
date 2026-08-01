@@ -1,0 +1,96 @@
+/* v2 §9 print layouts.
+   One payload, four papers: 58mm and 80mm till rolls, A5 and A4 sheets.
+   Everything outside .print-sheet is hidden when printing, so the same route
+   works on screen (preview) and on paper. */
+
+.print-root {
+  background: #f4f2ee;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.print-sheet {
+  background: #fff;
+  margin: 0 auto;
+  padding: 12mm;
+  width: 210mm;
+  min-height: 297mm;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  color: #111;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.print-sheet.a5 { width: 148mm; min-height: 210mm; padding: 8mm; font-size: 11px; }
+
+/* Till rolls: continuous paper, so no fixed height, and a monospace face
+   because that is what thermal heads render cleanly. */
+.print-sheet.thermal80,
+.print-sheet.thermal58 {
+  font-family: "DejaVu Sans Mono", ui-monospace, Menlo, Consolas, monospace;
+  min-height: auto;
+  box-shadow: none;
+  border: 1px dashed #bbb;
+}
+.print-sheet.thermal80 { width: 80mm; padding: 3mm; font-size: 10px; }
+.print-sheet.thermal58 { width: 58mm; padding: 2mm; font-size: 9px; }
+
+.print-head { text-align: center; border-bottom: 1px solid #000; padding-bottom: 6px; }
+.print-org { font-size: 1.5em; font-weight: 800; letter-spacing: 0.3px; }
+.print-branch { font-size: 0.92em; color: #333; }
+.print-title {
+  margin-top: 6px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+}
+
+.print-meta { display: flex; justify-content: space-between; gap: 16px; margin: 8px 0; }
+.print-meta > div { flex: 1; }
+.print-label { color: #555; font-size: 0.9em; }
+
+.print-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.print-table th,
+.print-table td { padding: 3px 4px; border-bottom: 1px solid #ddd; vertical-align: top; }
+.print-table th {
+  border-bottom: 1px solid #000; text-align: left; font-weight: 700; white-space: nowrap;
+}
+.print-table td.num,
+.print-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.print-totals { margin-left: auto; margin-top: 8px; width: 62%; }
+.print-totals td { padding: 2px 4px; }
+.print-totals td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.print-totals tr.grand td { border-top: 1px solid #000; font-weight: 800; font-size: 1.12em; }
+
+.print-words { margin-top: 8px; font-style: italic; }
+.print-foot {
+  margin-top: 16px; display: flex; justify-content: space-between; gap: 16px;
+  font-size: 0.9em; color: #333;
+}
+.print-cancelled {
+  color: #b00; border: 2px solid #b00; padding: 2px 8px; font-weight: 800;
+  display: inline-block; transform: rotate(-3deg);
+}
+
+/* Till rolls are one narrow column: stack everything and drop the wide bits. */
+.thermal80 .print-meta,
+.thermal58 .print-meta,
+.thermal80 .print-foot,
+.thermal58 .print-foot { display: block; }
+.thermal80 .print-totals,
+.thermal58 .print-totals { width: 100%; }
+.thermal58 .hide-58 { display: none; }
+
+@media print {
+  /* the app chrome must not reach the paper */
+  body * { visibility: hidden; }
+  .print-sheet, .print-sheet * { visibility: visible; }
+  .print-root { background: #fff; padding: 0; }
+  .print-sheet {
+    position: absolute; left: 0; top: 0; margin: 0;
+    box-shadow: none; border: 0; width: auto; min-height: auto;
+  }
+  .no-print { display: none !important; }
+}
+
+@page { size: A4; margin: 10mm; }
+@media print { .print-sheet.a5 ~ * { display: none; } }

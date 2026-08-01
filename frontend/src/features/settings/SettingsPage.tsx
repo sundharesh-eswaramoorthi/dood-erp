@@ -19,6 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getPrintSettings, savePrintSettings, type PrintSettings } from "../printing/api";
 import { useState } from "react";
 
 import {
@@ -55,6 +56,7 @@ export function SettingsPage() {
   const [branchForm, setBranchForm] = useState(EMPTY_BRANCH);
   const [godownForm, setGodownForm] = useState(EMPTY_GODOWN);
   const [docType, setDocType] = useState("");
+  const [printForm, setPrintForm] = useState<Partial<PrintSettings>>({});
   const [err, setErr] = useState<string | null>(null);
 
   const taxRates = useQuery({ queryKey: ["tax-rates"], queryFn: listTaxRates });
@@ -62,6 +64,7 @@ export function SettingsPage() {
   const flags = useQuery({ queryKey: ["feature-flags"], queryFn: getFeatureFlags });
   const branches = useQuery({ queryKey: ["branches-admin"], queryFn: () => listBranchesAdmin() });
   const godowns = useQuery({ queryKey: ["godowns-admin"], queryFn: listGodownsAdmin });
+  const printCfg = useQuery({ queryKey: ["print-settings"], queryFn: getPrintSettings });
   const docTypes = useQuery({
     queryKey: ["document-types", "all"],
     queryFn: () => listDocumentTypes("party", true),
@@ -78,6 +81,16 @@ export function SettingsPage() {
     qc.invalidateQueries({ queryKey: ["branches"] });
     qc.invalidateQueries({ queryKey: ["godowns"] });
   };
+
+  const savePrint = useMutation({
+    mutationFn: () => savePrintSettings(printForm),
+    onSuccess: () => {
+      setPrintForm({});
+      setErr(null);
+      qc.invalidateQueries({ queryKey: ["print-settings"] });
+    },
+    onError: fail,
+  });
 
   const addBranch = useMutation({
     mutationFn: () =>
@@ -271,6 +284,65 @@ export function SettingsPage() {
           <Typography variant="caption" color="text.secondary">
             A godown holding stock cannot be deactivated or moved to another branch.
           </Typography>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>Printing</Typography>
+          <Typography variant="caption" color="text.secondary">
+            The default paper for invoices. Thermal formats drop the HSN, discount and
+            tax-summary columns to fit the roll; the figures are identical either way.
+          </Typography>
+          {printCfg.data && (
+            <Stack spacing={2} sx={{ mt: 2 }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} flexWrap="wrap" useFlexGap>
+                <TextField
+                  size="small" label="Default paper" select sx={{ minWidth: 190 }}
+                  value={printForm.default_format ?? printCfg.data.default_format}
+                  onChange={(e) => setPrintForm({ ...printForm, default_format: e.target.value as PrintSettings["default_format"] })}
+                >
+                  <MenuItem value="a4">A4</MenuItem>
+                  <MenuItem value="a5">A5</MenuItem>
+                  <MenuItem value="thermal80">Thermal 80mm</MenuItem>
+                  <MenuItem value="thermal58">Thermal 58mm</MenuItem>
+                </TextField>
+                {([
+                  ["show_hsn", "Show HSN"],
+                  ["show_tax_summary", "Tax summary"],
+                  ["show_amount_in_words", "Amount in words"],
+                ] as const).map(([k, label]) => (
+                  <FormControlLabel
+                    key={k}
+                    control={
+                      <Switch
+                        size="small"
+                        checked={(printForm[k] ?? printCfg.data![k]) as boolean}
+                        onChange={(e) => setPrintForm({ ...printForm, [k]: e.target.checked })}
+                      />
+                    }
+                    label={label}
+                  />
+                ))}
+              </Stack>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  size="small" label="Terms" sx={{ flex: 1 }}
+                  value={printForm.terms ?? printCfg.data.terms}
+                  onChange={(e) => setPrintForm({ ...printForm, terms: e.target.value })}
+                />
+                <TextField
+                  size="small" label="Footer text" sx={{ flex: 1 }}
+                  value={printForm.footer_text ?? printCfg.data.footer_text}
+                  onChange={(e) => setPrintForm({ ...printForm, footer_text: e.target.value })}
+                />
+                <Button variant="contained" onClick={() => savePrint.mutate()}
+                  disabled={savePrint.isPending || !Object.keys(printForm).length}>
+                  Save
+                </Button>
+              </Stack>
+            </Stack>
+          )}
         </CardContent>
       </Card>
 

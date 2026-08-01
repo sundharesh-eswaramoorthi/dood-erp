@@ -384,6 +384,12 @@ export function SalesPage() {
                   </TableCell>
                   <TableCell align="right">
                     <Button size="small" onClick={() => setHistoryFor(b.id)}>History</Button>
+                    <Button
+                      size="small"
+                      onClick={() => window.open(`/print/sales_bill/${b.id}`, "_blank")}
+                    >
+                      Print
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
