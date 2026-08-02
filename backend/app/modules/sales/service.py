@@ -18,6 +18,7 @@ from app.modules.sales.schemas import (
     SaleOrderCreate,
     SalesReturnCreate,
 )
+from app.modules.shared import SUPPLY_TYPE
 from app.services import credit, doc_money, money
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
@@ -118,7 +119,7 @@ async def create_order(session: AsyncSession, principal: Principal, data: SaleOr
     # The order is priced exactly like the bill it becomes (v2 §4).
     computed = money.compute(
         await _money_inputs(session, data.lines),
-        supply_type=data.supply_type, price_mode=data.price_mode,
+        supply_type=SUPPLY_TYPE, price_mode=data.price_mode,
         header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
         card_charges=data.card_charges, round_off=data.round_off,
     )
@@ -134,7 +135,7 @@ async def create_order(session: AsyncSession, principal: Principal, data: SaleOr
                 "VALUES (:o,:b,:c,:no,:od,COALESCE(:dts, now()),:st,:pm,:dp,:nt,:rm,:by) RETURNING id"
             ),
             {"o": principal.org_id, "b": branch_id, "c": data.customer_id, "no": number,
-             "od": order_date, "dts": data.doc_datetime, "st": data.supply_type,
+             "od": order_date, "dts": data.doc_datetime, "st": SUPPLY_TYPE,
              "pm": data.price_mode, "dp": data.discount_pct, "nt": data.note,
              "rm": data.remarks, "by": principal.user_id},
         )
@@ -468,7 +469,10 @@ async def bill_order(
     ).mappings().all()
 
     # the order's own figures, unless the caller deliberately overrode them
-    supply_type = opts.supply_type if "supply_type" in sent else order["supply_type"]
+    # Read off the ORDER, not the constant: new orders are all intra, but an
+    # order taken before the picker was removed must still bill the way it was
+    # quoted — re-deriving it would re-split the GST on an existing quote.
+    supply_type = order["supply_type"]
     price_mode = opts.price_mode if "price_mode" in sent else order["price_mode"]
     header_pct = opts.discount_pct if "discount_pct" in sent else Decimal(order["discount_pct"])
     header_amt = (
@@ -605,7 +609,7 @@ async def post_direct_bill(
     bill_date = data.bill_date or dt.date.today()
     computed = money.compute(
         await _money_inputs(session, data.lines),
-        supply_type=data.supply_type, price_mode=data.price_mode,
+        supply_type=SUPPLY_TYPE, price_mode=data.price_mode,
         header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
         card_charges=data.card_charges, round_off=data.round_off, paid_amount=data.paid_amount,
     )
@@ -619,7 +623,7 @@ async def post_direct_bill(
                  "payment_account_id, created_by) "
                  "VALUES (:o,:b,:c,NULL,:no,:st,:pm,:bd,COALESCE(:dts, now()),:dp,:rm,:pa,:by) RETURNING id"),
             {"o": principal.org_id, "b": branch, "c": data.customer_id, "no": number,
-             "st": data.supply_type, "pm": data.price_mode, "bd": bill_date,
+             "st": SUPPLY_TYPE, "pm": data.price_mode, "bd": bill_date,
              "dts": data.doc_datetime, "dp": data.discount_pct, "rm": data.remarks,
              "pa": data.payment_account_id, "by": principal.user_id},
         )
@@ -724,7 +728,7 @@ async def post_sales_return(session: AsyncSession, principal: Principal, data: S
         ))
     computed = money.compute(
         money_lines,
-        supply_type=data.supply_type, price_mode=data.price_mode,
+        supply_type=SUPPLY_TYPE, price_mode=data.price_mode,
         header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
         card_charges=data.card_charges, round_off=data.round_off, paid_amount=data.paid_amount,
     )
@@ -738,7 +742,7 @@ async def post_sales_return(session: AsyncSession, principal: Principal, data: S
                  "payment_account_id, created_by) "
                  "VALUES (:o,:b,:c,:g,:no,:ob,:st,:pm,:rd,COALESCE(:dts, now()),:dp,:rm,:pa,:by) RETURNING id"),
             {"o": principal.org_id, "b": branch, "c": data.customer_id, "g": data.godown_id, "no": number,
-             "ob": data.orig_bill_id, "st": data.supply_type, "pm": data.price_mode, "rd": rdate,
+             "ob": data.orig_bill_id, "st": SUPPLY_TYPE, "pm": data.price_mode, "rd": rdate,
              "dts": data.doc_datetime, "dp": data.discount_pct, "rm": data.remarks,
              "pa": data.payment_account_id, "by": principal.user_id},
         )
@@ -791,7 +795,7 @@ async def post_sales_return(session: AsyncSession, principal: Principal, data: S
     )
     await emit(session, principal.org_id, "sale.return", {"return_id": ret_id, "customer_id": data.customer_id})
     return {"id": ret_id, "doc_no": number, "status": "posted", "customer_id": data.customer_id,
-            "supply_type": data.supply_type, "price_mode": data.price_mode, "return_date": rdate,
+            "supply_type": SUPPLY_TYPE, "price_mode": data.price_mode, "return_date": rdate,
             "lines": out_lines, "gross_total": t.gross_total,
             "line_discount_total": t.line_discount_total, "discount_amount": t.header_discount,
             "taxable_total": t.taxable_total, "tax_total": t.tax_total,

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.deps import Principal, get_principal
-from app.modules.shared import MoneyHeaderIn
+from app.modules.shared import SUPPLY_TYPE, MoneyHeaderIn
 from app.services import money
 
 router = APIRouter()
@@ -28,7 +28,6 @@ class PreviewLineIn(BaseModel):
 
 
 class PreviewIn(MoneyHeaderIn):
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     lines: list[PreviewLineIn] = Field(default_factory=list)
 
 
@@ -44,7 +43,7 @@ async def preview(payload: PreviewIn, principal: Principal = Depends(get_princip
                              discount_pct=ln.discount_pct, discount_amount=ln.discount_amount)
                 for ln in usable
             ],
-            supply_type=payload.supply_type, price_mode=payload.price_mode,
+            supply_type=SUPPLY_TYPE, price_mode=payload.price_mode,
             header_discount_pct=payload.discount_pct,
             header_discount_amount=payload.discount_amount,
             card_charges=payload.card_charges, round_off=payload.round_off,

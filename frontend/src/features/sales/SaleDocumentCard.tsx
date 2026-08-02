@@ -59,7 +59,6 @@ export function SaleDocumentCard({
 }) {
   const [lines, setLines] = useState<SaleLine[]>([emptyLine()]);
   const [money, setMoney] = useState<MoneyHeader>({ ...EMPTY_MONEY });
-  const [supply, setSupply] = useState("intra");
   const [posting, setPosting] = useState(false);
 
   // a line's godown has to belong to the chosen branch — switching branch
@@ -74,8 +73,8 @@ export function SaleDocumentCard({
 
   const previewLines = toPreviewLines(lines);
   const preview = useQuery({
-    queryKey: ["money-preview", previewLines, money, supply],
-    queryFn: () => previewMoney(previewLines, money, supply),
+    queryKey: ["money-preview", previewLines, money],
+    queryFn: () => previewMoney(previewLines, money),
     enabled: previewLines.length > 0,
   });
 
@@ -88,7 +87,6 @@ export function SaleDocumentCard({
       await onSubmit({
         customer_id: Number(customer),
         branch_id: Number(branch),
-        supply_type: supply,
         ...(showMoney ? moneyPayload(money) : {}),
         lines: toPayload(lines),
       });
@@ -122,13 +120,6 @@ export function SaleDocumentCard({
                 helperText="the godowns below are this branch's"
               >
                 {branches.map((b) => (<MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>))}
-              </TextField>
-              <TextField
-                label="Supply" select size="small" value={supply}
-                onChange={(e) => setSupply(e.target.value)} sx={{ minWidth: 190 }}
-              >
-                <MenuItem value="intra">Intra (CGST+SGST)</MenuItem>
-                <MenuItem value="inter">Inter (IGST)</MenuItem>
               </TextField>
             </Stack>
 

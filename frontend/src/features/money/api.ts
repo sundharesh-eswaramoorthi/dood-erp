@@ -113,11 +113,9 @@ export interface PreviewResult {
 export async function previewMoney(
   lines: PreviewLine[],
   header: MoneyHeader,
-  supply_type: string,
 ): Promise<PreviewResult> {
   const { data } = await api.post<PreviewResult>("/api/v1/money/preview", {
     ...moneyPayload(header),
-    supply_type,
     lines: lines.map((l) => ({
       qty: l.qty || "0",
       rate: l.rate || "0",

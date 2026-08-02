@@ -35,10 +35,9 @@ export function BillDialog({
   products: { id: number; gst_rate: string | null }[];
   posting: boolean;
   onClose: () => void;
-  onPost: (money: Record<string, unknown>, supply: string) => void;
+  onPost: (money: Record<string, unknown>) => void;
 }) {
   const [mny, setMny] = useState<MoneyHeader>({ ...EMPTY_MONEY });
-  const [supply, setSupply] = useState("intra");
 
   const order = useQuery({
     queryKey: ["sale-order", orderId],
@@ -53,8 +52,8 @@ export function BillDialog({
   }));
 
   const preview = useQuery({
-    queryKey: ["money-preview", previewLines, mny, supply],
-    queryFn: () => previewMoney(previewLines, mny, supply),
+    queryKey: ["money-preview", previewLines, mny],
+    queryFn: () => previewMoney(previewLines, mny),
     enabled: previewLines.length > 0,
   });
 
@@ -64,13 +63,6 @@ export function BillDialog({
       <DialogContent>
         <Stack spacing={2} sx={{ mt: 1 }}>
           <Stack direction="row" spacing={2} alignItems="center">
-            <TextField
-              size="small" label="Supply" select value={supply}
-              onChange={(e) => setSupply(e.target.value)} sx={{ width: 190 }}
-            >
-              <MenuItem value="intra">Intra (CGST+SGST)</MenuItem>
-              <MenuItem value="inter">Inter (IGST)</MenuItem>
-            </TextField>
             <Typography variant="body2" color="text.secondary">
               {previewLines.length} line{previewLines.length === 1 ? "" : "s"} from the order
             </Typography>
@@ -92,7 +84,7 @@ export function BillDialog({
         <Button
           variant="contained"
           disabled={posting || !previewLines.length}
-          onClick={() => onPost(moneyPayload(mny), supply)}
+          onClick={() => onPost(moneyPayload(mny))}
         >
           Post bill
         </Button>

@@ -46,8 +46,8 @@ export function SalesInvoicesPage() {
   const billable = (orders.data ?? []).filter((o) => o.status === "delivered");
 
   const bill = useMutation({
-    mutationFn: (args: { id: number; money: Record<string, unknown>; supply: string }) =>
-      billOrder(args.id, args.money, args.supply),
+    mutationFn: (args: { id: number; money: Record<string, unknown> }) =>
+      billOrder(args.id, args.money),
     onSuccess: (b) => {
       const paid = Number(b.paid_amount ?? 0)
         ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}`
@@ -201,7 +201,7 @@ export function SalesInvoicesPage() {
         products={products.data ?? []}
         posting={bill.isPending}
         onClose={() => setBilling(null)}
-        onPost={(money, supply) => billing && bill.mutate({ id: billing, money, supply })}
+        onPost={(money) => billing && bill.mutate({ id: billing, money })}
       />
     </Stack>
   );

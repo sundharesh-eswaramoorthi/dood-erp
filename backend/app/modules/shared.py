@@ -11,6 +11,17 @@ from decimal import Decimal
 
 from pydantic import BaseModel, Field, model_validator
 
+# The business trades inside one state, so every document is an intra-state
+# supply and GST always splits CGST+SGST. Asking the counter to choose between
+# "Intra" and "Inter" on every invoice was a question with one answer, so the
+# documents no longer accept it and the server decides.
+#
+# Deliberately a constant and not a deletion: app.services.money still computes
+# IGST correctly (see test_money.py) and the igst columns are still written and
+# reported. Selling across a state line again means restoring the picker, not
+# rebuilding the tax arithmetic.
+SUPPLY_TYPE = "intra"
+
 
 class MoneyLineIn(BaseModel):
     """Per-line money + placement fields common to all invoice types."""

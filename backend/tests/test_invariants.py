@@ -306,7 +306,7 @@ async def test_purchase_bill_money_model_reaches_the_ledger(ctx):
     prin = Principal(user_id=1, org_id=org, branch_ids=[branch], perms={"*"}, name="t")
 
     bill = await purchase.post_bill(s, prin, PurchaseBillCreate(
-        supplier_id=party, godown_id=godown, supply_type="intra",
+        supplier_id=party, godown_id=godown,
         discount_amount=Decimal("190"), card_charges=Decimal("10"),
         lines=[
             BillLineIn(product_id=product, entered_qty=Decimal(10), entered_unit_id=unit,

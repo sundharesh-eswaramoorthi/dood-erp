@@ -26,6 +26,7 @@ from app.modules.purchase.schemas import (
     PurchaseReturnCreate,
     ReceivePOIn,
 )
+from app.modules.shared import SUPPLY_TYPE
 from app.services import doc_money, money
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
@@ -69,7 +70,7 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
     bill_date = data.bill_date or dt.date.today()
     computed = money.compute(
         await _money_inputs(session, data.lines),
-        supply_type=data.supply_type, price_mode=data.price_mode,
+        supply_type=SUPPLY_TYPE, price_mode=data.price_mode,
         header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
         card_charges=data.card_charges, round_off=data.round_off, paid_amount=data.paid_amount,
     )
@@ -86,7 +87,7 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
                 "RETURNING id"
             ),
             {"o": principal.org_id, "b": branch_id, "s": data.supplier_id, "g": data.godown_id,
-             "no": number, "inv": data.supplier_invoice_no, "po": data.po_id, "st": data.supply_type,
+             "no": number, "inv": data.supplier_invoice_no, "po": data.po_id, "st": SUPPLY_TYPE,
              "pm": data.price_mode, "bd": bill_date, "dts": data.doc_datetime,
              "dp": data.discount_pct, "rm": data.remarks, "pa": data.payment_account_id,
              "by": principal.user_id},
@@ -151,7 +152,7 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
     await emit(session, principal.org_id, "purchase.bill",
                {"bill_id": bill_id, "supplier_id": data.supplier_id, "grand_total": str(t.grand_total)})
     return {"id": bill_id, "doc_no": number, "status": "posted", "supplier_id": data.supplier_id,
-            "supply_type": data.supply_type, "price_mode": data.price_mode, "bill_date": bill_date,
+            "supply_type": SUPPLY_TYPE, "price_mode": data.price_mode, "bill_date": bill_date,
             "po_id": data.po_id, "lines": out_lines, **_totals_dict(t)}
 
 
@@ -185,7 +186,7 @@ async def post_return(session: AsyncSession, principal: Principal, data: Purchas
     rdate = data.return_date or dt.date.today()
     computed = money.compute(
         await _money_inputs(session, data.lines),
-        supply_type=data.supply_type, price_mode=data.price_mode,
+        supply_type=SUPPLY_TYPE, price_mode=data.price_mode,
         header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
         card_charges=data.card_charges, round_off=data.round_off, paid_amount=data.paid_amount,
     )
@@ -202,7 +203,7 @@ async def post_return(session: AsyncSession, principal: Principal, data: Purchas
                 "RETURNING id"
             ),
             {"o": principal.org_id, "b": branch_id, "s": data.supplier_id, "g": data.godown_id,
-             "no": number, "ob": data.orig_bill_id, "st": data.supply_type, "pm": data.price_mode,
+             "no": number, "ob": data.orig_bill_id, "st": SUPPLY_TYPE, "pm": data.price_mode,
              "rd": rdate, "dts": data.doc_datetime, "dp": data.discount_pct, "rm": data.remarks,
              "pa": data.payment_account_id, "by": principal.user_id},
         )
@@ -267,7 +268,7 @@ async def post_return(session: AsyncSession, principal: Principal, data: Purchas
     await emit(session, principal.org_id, "purchase.return",
                {"return_id": ret_id, "supplier_id": data.supplier_id, "grand_total": str(t.grand_total)})
     return {"id": ret_id, "doc_no": number, "status": "posted", "supplier_id": data.supplier_id,
-            "supply_type": data.supply_type, "price_mode": data.price_mode, "return_date": rdate,
+            "supply_type": SUPPLY_TYPE, "price_mode": data.price_mode, "return_date": rdate,
             "lines": out_lines, **_totals_dict(t)}
 
 
@@ -291,7 +292,7 @@ async def create_po(session: AsyncSession, principal: Principal, data: PurchaseO
     # A PO moves no stock, but it is priced exactly like the bill it becomes.
     computed = money.compute(
         await _money_inputs(session, data.lines),
-        supply_type=data.supply_type, price_mode=data.price_mode,
+        supply_type=SUPPLY_TYPE, price_mode=data.price_mode,
         header_discount_pct=data.discount_pct, header_discount_amount=data.discount_amount,
         card_charges=data.card_charges, round_off=data.round_off,
         paid_amount=data.advance_amount,     # validated as "not more than the order"
@@ -311,7 +312,7 @@ async def create_po(session: AsyncSession, principal: Principal, data: PurchaseO
             ),
             {"o": principal.org_id, "b": branch_id, "s": data.supplier_id, "g": data.godown_id,
              "no": number, "od": order_date, "ed": data.expected_date, "dts": data.doc_datetime,
-             "st": data.supply_type, "pm": data.price_mode, "dp": data.discount_pct,
+             "st": SUPPLY_TYPE, "pm": data.price_mode, "dp": data.discount_pct,
              "nt": data.note, "rm": data.remarks, "pa": data.payment_account_id,
              "by": principal.user_id},
         )
@@ -469,7 +470,6 @@ async def receive_po(
             branch_id=po["branch_id"],
             supplier_invoice_no=data.supplier_invoice_no,
             po_id=po_id,
-            supply_type=data.supply_type or po["supply_type"],
             bill_date=data.bill_date,
             price_mode=data.price_mode,
             discount_pct=data.discount_pct,

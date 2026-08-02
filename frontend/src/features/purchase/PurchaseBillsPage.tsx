@@ -61,7 +61,7 @@ export function PurchaseBillsPage() {
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
 
-  const [f, setF] = useState({ supplier: "", godown: "", supply_type: "intra" });
+  const [f, setF] = useState({ supplier: "", godown: "" });
   const [lines, setLines] = useState<DraftLine[]>([{ ...EMPTY_LINE }]);
   const [mny, setMny] = useState<MoneyHeader>({ ...EMPTY_MONEY });
   const [msg, setMsg] = useState<string | null>(null);
@@ -77,12 +77,11 @@ export function PurchaseBillsPage() {
   // Totals come from the server's money engine so the preview and the posted
   // document can never disagree.
   const preview = useQuery({
-    queryKey: ["money-preview", filled, mny, f.supply_type],
+    queryKey: ["money-preview", filled, mny],
     queryFn: () =>
       previewMoney(
         filled.map((l) => ({ qty: l.qty, rate: l.rate, gst_rate: l.gst, discount_pct: l.discount_pct })),
         mny,
-        f.supply_type,
       ),
     enabled: filled.length > 0,
   });
@@ -94,8 +93,8 @@ export function PurchaseBillsPage() {
     mutationFn: () =>
       createBill({
         supplier_id: Number(f.supplier),
+        branch_id: scope.branchId,
         godown_id: Number(f.godown),
-        supply_type: f.supply_type,
         ...moneyPayload(mny),
         lines: filled.map((l) => ({
           product_id: Number(l.product),
@@ -167,10 +166,6 @@ export function PurchaseBillsPage() {
                   {(godowns.data ?? []).map((g) => (
                     <MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>
                   ))}
-                </TextField>
-                <TextField label="Supply" select value={f.supply_type} onChange={(e) => setF({ ...f, supply_type: e.target.value })} sx={{ width: 170 }}>
-                  <MenuItem value="intra">Intra (CGST+SGST)</MenuItem>
-                  <MenuItem value="inter">Inter (IGST)</MenuItem>
                 </TextField>
               </Stack>
 

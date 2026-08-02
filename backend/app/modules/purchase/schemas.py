@@ -24,7 +24,6 @@ class PurchaseBillCreate(MoneyHeaderIn):
     branch_id: int | None = None
     supplier_invoice_no: str | None = None
     po_id: int | None = None                 # v2 §3 "PO number"
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     bill_date: dt.date | None = None
     lines: list[BillLineIn] = Field(min_length=1)
 
@@ -52,7 +51,6 @@ class PurchaseReturnCreate(MoneyHeaderIn):
     godown_id: int | None = None
     branch_id: int | None = None
     orig_bill_id: int | None = None
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     return_date: dt.date | None = None
     lines: list[BillLineIn] = Field(min_length=1)
 
@@ -84,7 +82,6 @@ class PurchaseOrderCreate(MoneyHeaderIn):
     supplier_id: int
     godown_id: int | None = None
     branch_id: int | None = None
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     order_date: dt.date | None = None
     expected_date: dt.date | None = None
     note: str | None = None
@@ -141,7 +138,6 @@ class ReceivePOIn(MoneyHeaderIn):
 
     supplier_invoice_no: str | None = None
     bill_date: dt.date | None = None
-    supply_type: str | None = None          # defaults to the PO's
     lines: list[BillLineIn] | None = None   # None = receive the whole balance
 
 

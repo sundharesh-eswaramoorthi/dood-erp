@@ -98,12 +98,8 @@ export interface BilledOut {
 export async function billOrder(
   id: number,
   money: Record<string, unknown> = {},
-  supplyType = "intra",
 ): Promise<BilledOut> {
-  const { data } = await api.post(`/api/v1/sales/orders/${id}/bill`, {
-    supply_type: supplyType,
-    ...money,
-  });
+  const { data } = await api.post(`/api/v1/sales/orders/${id}/bill`, { ...money });
   return data as BilledOut;
 }
 
@@ -120,7 +116,6 @@ export async function createDirectBill(
   payload: {
     customer_id: number;
     branch_id?: number;
-    supply_type?: string;
     lines: SaleLineIn[];
   } & Record<string, unknown>,
 ): Promise<BilledOut & { doc_no: string | null }> {
@@ -148,7 +143,6 @@ export async function createReturn(
     customer_id: number;
     branch_id?: number;
     orig_bill_id?: number;
-    supply_type?: string;
     lines: SaleLineIn[];
   } & Record<string, unknown>,
 ): Promise<SalesReturn & BilledOut> {

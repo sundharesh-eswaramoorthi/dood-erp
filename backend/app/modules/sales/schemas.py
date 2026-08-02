@@ -21,7 +21,6 @@ class SaleOrderCreate(MoneyHeaderIn):
     customer_id: int
     branch_id: int | None = None
     order_date: dt.date | None = None
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     note: str | None = None
     lines: list[OrderLineIn] = Field(min_length=1)
 
@@ -93,7 +92,6 @@ class DirectBillCreate(MoneyHeaderIn):
 
     customer_id: int
     branch_id: int | None = None
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     bill_date: dt.date | None = None
     lines: list[DirectBillLineIn] = Field(min_length=1)
 
@@ -130,8 +128,6 @@ class DeliveryOut(BaseModel):
 class BillOrderIn(MoneyHeaderIn):
     """The order supplies the lines; this supplies the v2 §4 money block."""
 
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
-
 
 class SalesBillLineOut(MoneyLineOut):
     moved_qty: Decimal
@@ -167,7 +163,6 @@ class SalesReturnCreate(MoneyHeaderIn):
     branch_id: int | None = None
     orig_bill_id: int | None = None
     return_date: dt.date | None = None
-    supply_type: str = Field(default="intra", pattern="^(intra|inter)$")
     lines: list[SalesReturnLineIn] = Field(min_length=1)
 
 

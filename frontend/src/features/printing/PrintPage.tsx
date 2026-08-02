@@ -92,9 +92,6 @@ export function PrintPage() {
             {d.document.supplier_invoice_no && (
               <div><span className="print-label">Supplier inv: </span>{d.document.supplier_invoice_no}</div>
             )}
-            {d.document.supply_type && (
-              <div><span className="print-label">Supply: </span>{d.document.supply_type}</div>
-            )}
             {d.document.payment_type && (
               <div><span className="print-label">Paid by: </span>{d.document.payment_type}</div>
             )}

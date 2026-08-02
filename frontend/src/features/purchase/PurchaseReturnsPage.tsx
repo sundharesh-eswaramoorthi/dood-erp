@@ -25,7 +25,7 @@ import { BranchFilter } from "../../components/BranchFilter";
 import { useBranchScope } from "../../components/useBranchScope";
 import { createReturn, listReturns, type PurchaseReturnRow } from "./api";
 
-const EMPTY = { supplier: "", godown: "", supply_type: "intra", product: "", qty: "", rate: "", gst: "", unit_id: "" };
+const EMPTY = { supplier: "", godown: "", product: "", qty: "", rate: "", gst: "", unit_id: "" };
 
 /** v2 §3 debit note: goods go back to the supplier and the payable falls. */
 export function PurchaseReturnsPage() {
@@ -52,8 +52,8 @@ export function PurchaseReturnsPage() {
     mutationFn: () =>
       createReturn({
         supplier_id: Number(r.supplier),
+        branch_id: scope.branchId,
         godown_id: Number(r.godown),
-        supply_type: r.supply_type,
         lines: [
           { product_id: Number(r.product), entered_qty: r.qty, entered_unit_id: unitId ?? 0,
             rate: r.rate, gst_rate: r.gst || undefined },
