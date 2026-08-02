@@ -86,10 +86,11 @@ class TransferLineIn(BaseModel):
 
 
 class TransferCreate(BaseModel):
+    # The branches are NOT taken from the caller — each is read off its godown,
+    # so the two can never disagree and a cross-branch move needs no extra
+    # field. Pick a destination godown in another branch and it is one.
     from_godown_id: int
     to_godown_id: int
-    from_branch_id: int | None = None
-    to_branch_id: int | None = None
     lines: list[TransferLineIn] = Field(min_length=1)
 
 
@@ -104,6 +105,8 @@ class TransferOut(BaseModel):
     id: int
     doc_no: str | None
     status: str
+    from_branch_id: int
+    to_branch_id: int
     from_godown_id: int
     to_godown_id: int
     lines: list[TransferLineOut]

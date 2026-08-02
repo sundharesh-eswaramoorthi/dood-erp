@@ -139,6 +139,8 @@ async def transfer_dispatch(
         return await service.dispatch_transfer(session, principal, transfer_id)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transfer not found")
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except OverSell as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
     except ValueError as e:
@@ -155,6 +157,8 @@ async def transfer_receive(
         return await service.receive_transfer(session, principal, transfer_id)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Transfer not found")
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 

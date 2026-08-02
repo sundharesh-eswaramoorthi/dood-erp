@@ -59,9 +59,13 @@ async def ctx(migrated_db):
         org = (await s.execute(text("INSERT INTO organization (name) VALUES ('T') RETURNING id"))).scalar_one()
         await s.execute(text("SELECT set_config('app.org_id', :o, false)"), {"o": str(org)})
         branch = (await s.execute(text("INSERT INTO branch (org_id, name) VALUES (:o,'B') RETURNING id"), {"o": org})).scalar_one()
-        await s.execute(text("SELECT set_config('app.branch_ids', :b, false)"), {"b": str(branch)})
+        # a second branch with its own store, so branch-to-branch movement has
+        # somewhere to go; tests that want one branch scope their own Principal
+        branch2 = (await s.execute(text("INSERT INTO branch (org_id, name) VALUES (:o,'Second Branch') RETURNING id"), {"o": org})).scalar_one()
+        await s.execute(text("SELECT set_config('app.branch_ids', :b, false)"), {"b": f"{branch},{branch2}"})
         g1 = (await s.execute(text("INSERT INTO godown (org_id, branch_id, name) VALUES (:o,:b,'G1') RETURNING id"), {"o": org, "b": branch})).scalar_one()
         g2 = (await s.execute(text("INSERT INTO godown (org_id, branch_id, name) VALUES (:o,:b,'G2') RETURNING id"), {"o": org, "b": branch})).scalar_one()
+        g3 = (await s.execute(text("INSERT INTO godown (org_id, branch_id, name) VALUES (:o,:b,'G3') RETURNING id"), {"o": org, "b": branch2})).scalar_one()
         unit = (await s.execute(text("INSERT INTO unit_of_measure (org_id, code, name) VALUES (:o,'BAG','Bag') RETURNING id"), {"o": org})).scalar_one()
         prod = (await s.execute(
             text("INSERT INTO product (org_id, code, name, base_unit_id, created_by) VALUES (:o,'P1','Test',:u,1) RETURNING id"),
@@ -82,13 +86,15 @@ async def ctx(migrated_db):
         for doc_type, prefix in [("sale_order", "SO-"), ("delivery", "DLV-"), ("sales_bill", "SB-"),
                                  ("sales_return", "SR-"), ("purchase_bill", "PB-"),
                                  ("purchase_return", "PR-"), ("purchase_order", "PO-"), ("payment_voucher", "PV-"),
-                                 ("party", "CUST-"), ("product", "PRD-"), ("stock_adjustment", "ADJ-")]:
+                                 ("party", "CUST-"), ("product", "PRD-"), ("stock_adjustment", "ADJ-"),
+                                 ("stock_transfer", "TRF-")]:
             await s.execute(
                 text("INSERT INTO numbering_series (org_id, branch_id, doc_type, fin_year, prefix, pad_width) "
                      "VALUES (:o, NULL, :d, :fy, :px, 4)"),
                 {"o": org, "d": doc_type, "fy": fy, "px": prefix},
             )
         await s.commit()
-        yield {"s": s, "org": org, "branch": branch, "godown": g1, "godown2": g2, "unit": unit,
+        yield {"s": s, "org": org, "branch": branch, "branch2": branch2,
+               "godown": g1, "godown2": g2, "godown3": g3, "unit": unit,
                "product": prod, "party": party, "account": account}
     await engine.dispose()

@@ -41,6 +41,7 @@ export interface AdjustmentLineIn {
 }
 
 export interface AdjustmentCreate {
+  branch_id?: number;
   godown_id: number;
   adj_reason: string;
   lines: AdjustmentLineIn[];
@@ -107,6 +108,8 @@ export interface Transfer {
   id: number;
   doc_no: string | null;
   status: string;
+  from_branch_id: number;
+  to_branch_id: number;
   from_godown_id: number;
   to_godown_id: number;
   lines: TransferLine[];
@@ -145,6 +148,7 @@ export interface Verification {
 }
 
 export async function createVerification(payload: {
+  branch_id?: number;
   godown_id: number;
   lines: { product_id: number; physical_qty: string }[];
 }): Promise<Verification> {

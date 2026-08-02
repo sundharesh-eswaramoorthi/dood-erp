@@ -172,18 +172,53 @@ async def get_transfer(session: AsyncSession, transfer_id: int) -> dict:
     ).mappings().all()
     return {
         "id": hdr["id"], "doc_no": hdr["doc_no"], "status": hdr["status"],
+        "from_branch_id": hdr["from_branch_id"], "to_branch_id": hdr["to_branch_id"],
         "from_godown_id": hdr["from_godown_id"], "to_godown_id": hdr["to_godown_id"],
         "lines": [dict(r) for r in lines],
     }
 
 
+async def _transfer_branch_of(session: AsyncSession, principal: Principal, godown_id: int, end: str) -> int:
+    """The branch a transfer godown belongs to.
+
+    Read from the godown rather than taken from the caller: stock_balance is
+    keyed on (branch, godown), so a branch that does not own the godown opens a
+    bucket no other document can reach. The godown table carries branch RLS, so
+    a godown in a branch this user does not work in simply is not here — which
+    is the permission check as well as the lookup.
+    """
+    branch_id = (
+        await session.execute(
+            text("SELECT branch_id FROM godown WHERE id=:g AND org_id=:o AND is_active"),
+            {"g": godown_id, "o": principal.org_id},
+        )
+    ).scalar_one_or_none()
+    if branch_id is None:
+        raise ValueError(f"{end} godown {godown_id} is not an active godown you can reach")
+    if branch_id not in principal.branch_ids:
+        # Only reachable for a superuser-ish principal whose RLS is wider than
+        # its branch list; say which end failed rather than failing later.
+        raise PermissionError(f"{end} branch {branch_id} not permitted")
+    return branch_id
+
+
 async def create_transfer(session: AsyncSession, principal: Principal, data: TransferCreate) -> dict:
-    from_branch = data.from_branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
-    to_branch = data.to_branch_id or from_branch
-    if from_branch is None:
+    """Move goods between godowns — of one branch, or of two.
+
+    A cross-branch transfer is the same document: dispatch takes the goods out
+    of the source at its moving-average cost and receive puts them into the
+    destination at that carried cost, so the value crosses with the goods
+    instead of being re-derived at the far end.
+
+    Both ends must be branches the caller works in, because one person drives
+    the whole document through to receipt.
+    """
+    if not principal.branch_ids:
         raise ValueError("Caller has no branch access")
-    if from_branch not in principal.branch_ids:
-        raise PermissionError("Source branch not permitted")
+    if data.from_godown_id == data.to_godown_id:
+        raise ValueError("source and destination godown must differ")
+    from_branch = await _transfer_branch_of(session, principal, data.from_godown_id, "source")
+    to_branch = await _transfer_branch_of(session, principal, data.to_godown_id, "destination")
     number = await allocate(session, principal.org_id, None, "stock_transfer")
     tid = (
         await session.execute(
@@ -218,6 +253,11 @@ async def dispatch_transfer(session: AsyncSession, principal: Principal, transfe
         raise LookupError("Transfer not found")
     if hdr["status"] != "draft":
         raise ValueError(f"Transfer is '{hdr['status']}', not draft")
+    # stock_transfer is org-visible (a transfer spans two branches) but
+    # stock_balance is branch-scoped, so without this the move would die inside
+    # the RLS policy as a bare 500 instead of saying what was wrong.
+    if hdr["from_branch_id"] not in principal.branch_ids:
+        raise PermissionError("You do not work in the branch these goods are leaving")
     eff = dt.date.today()
     lines = (
         await session.execute(
@@ -258,6 +298,8 @@ async def receive_transfer(session: AsyncSession, principal: Principal, transfer
         raise LookupError("Transfer not found")
     if hdr["status"] != "dispatched":
         raise ValueError(f"Transfer is '{hdr['status']}', not dispatched")
+    if hdr["to_branch_id"] not in principal.branch_ids:
+        raise PermissionError("You do not work in the branch these goods are arriving at")
     eff = dt.date.today()
     lines = (
         await session.execute(
@@ -290,6 +332,11 @@ async def create_verification(session: AsyncSession, principal: Principal, data:
         raise ValueError("Caller has no branch access")
     if branch_id not in principal.branch_ids:
         raise PermissionError("Branch not permitted")
+    # Same rule the adjustment already enforced: a count is taken against the
+    # (branch, godown) bucket, so an unrelated pair would compare the physical
+    # figure to a balance that belongs to nobody and post the whole thing as a
+    # delta. It failed silently rather than loudly, which is worse.
+    await doc_money.resolve_godown(session, branch_id, data.godown_id, None)
     number = await allocate(session, principal.org_id, None, "stock_verification")
     vid = (
         await session.execute(

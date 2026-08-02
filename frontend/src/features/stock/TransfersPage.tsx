@@ -39,9 +39,12 @@ import {
 export function TransfersPage() {
   const qc = useQueryClient();
   const scope = useBranchScope();
-  // godowns of the selected branch only — posting into another
-  // branch's godown is refused by the server anyway
+  // The source is a godown of the branch you are working in. The DESTINATION
+  // is any godown you can reach, in any of your branches — that is what makes
+  // this a branch-to-branch transfer. The server reads the branch off each
+  // godown, so choosing one across the line is the whole gesture.
   const godowns: { data: Godown[] } = { data: scope.godowns };
+  const destinations = scope.allGodowns;
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
 
   const [t, setT] = useState({ from: "", to: "", product: "", qty: "" });
@@ -58,9 +61,23 @@ export function TransfersPage() {
 
   useEffect(() => {
     const g = godowns.data;
-    if (g && g.length >= 2 && !t.from) setT((s) => ({ ...s, from: String(g[0].id), to: String(g[1].id) }));
+    if (g && g.length >= 1 && !t.from) setT((s) => ({ ...s, from: String(g[0].id) }));
     if (g && g.length >= 1 && !v.godown) setV((s) => ({ ...s, godown: String(g[0].id) }));
   }, [godowns.data, t.from, v.godown]);
+  // default the destination to the first godown that is not the source, which
+  // may well be in another branch when this one has only the one store
+  useEffect(() => {
+    if (!t.from || t.to) return;
+    const other = destinations.find((g) => String(g.id) !== t.from);
+    if (other) setT((s) => ({ ...s, to: String(other.id) }));
+  }, [destinations, t.from, t.to]);
+  // switching branch repoints the source; a destination that is still reachable
+  // stays put so a deliberate cross-branch choice is not silently undone
+  useEffect(() => {
+    if (t.from && !godowns.data.some((g) => String(g.id) === t.from)) {
+      setT((s) => ({ ...s, from: godowns.data[0] ? String(godowns.data[0].id) : "" }));
+    }
+  }, [godowns.data, t.from]);
   useEffect(() => {
     const p = products.data;
     if (p && p.length && !t.product) setT((s) => ({ ...s, product: String(p[0].id) }));
@@ -68,7 +85,11 @@ export function TransfersPage() {
   }, [products.data, t.product, v.product]);
 
   const baseUnitOf = (pid: number) => products.data?.find((p) => p.id === pid)?.base_unit_id ?? 0;
-  const godownName = (id: number) => godowns.data?.find((g) => g.id === id)?.name ?? id;
+  const branchOfGodown = (id: string) => destinations.find((g) => String(g.id) === id)?.branch_id;
+  // the move crosses a branch line when the two godowns sit in different branches
+  const crossBranch =
+    !!t.from && !!t.to && branchOfGodown(t.from) !== undefined &&
+    branchOfGodown(t.from) !== branchOfGodown(t.to);
   const refreshStock = () => qc.invalidateQueries({ queryKey: ["stock-current"] });
   const refreshList = () => qc.invalidateQueries({ queryKey: ["transfers"] });
 
@@ -110,6 +131,7 @@ export function TransfersPage() {
   const mVerify = useMutation({
     mutationFn: async () => {
       const created = await createVerification({
+        branch_id: scope.branchId,
         godown_id: Number(v.godown),
         lines: [{ product_id: Number(v.product), physical_qty: v.physical }],
       });
@@ -151,9 +173,16 @@ export function TransfersPage() {
                   <MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>
                 ))}
               </TextField>
-              <TextField label="To" select value={t.to} onChange={(e) => setT({ ...t, to: e.target.value })} sx={{ width: 170 }}>
-                {(godowns.data ?? []).map((g) => (
-                  <MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>
+              <TextField
+                label="To"
+                select
+                value={t.to}
+                onChange={(e) => setT({ ...t, to: e.target.value })}
+                sx={{ width: 220 }}
+                helperText={scope.multiBranch ? "any branch you work in" : undefined}
+              >
+                {destinations.map((g) => (
+                  <MenuItem key={g.id} value={String(g.id)}>{scope.godownLabel(g.id)}</MenuItem>
                 ))}
               </TextField>
               <TextField label="Product" select value={t.product} onChange={(e) => setT({ ...t, product: e.target.value })} sx={{ width: 220 }}>
@@ -170,6 +199,14 @@ export function TransfersPage() {
           {t.from === t.to && (
             <Typography color="error" variant="caption">
               Source and destination godown must differ.
+            </Typography>
+          )}
+          {crossBranch && (
+            <Typography color="text.secondary" variant="caption" component="div" sx={{ mt: 1 }}>
+              Branch transfer: {scope.branchName(branchOfGodown(t.from)!)} →{" "}
+              {scope.branchName(branchOfGodown(t.to)!)}. The goods leave on dispatch at their
+              current average cost and arrive at that same cost when received, so the value
+              travels with them.
             </Typography>
           )}
 
@@ -189,7 +226,8 @@ export function TransfersPage() {
                 ) : undefined
               }
             >
-              {current.doc_no} · {godownName(current.from_godown_id)} → {godownName(current.to_godown_id)} ·{" "}
+              {current.doc_no} · {scope.godownLabel(current.from_godown_id)} →{" "}
+              {scope.godownLabel(current.to_godown_id)} ·{" "}
               <Chip size="small" label={current.status} />
               {current.status === "dispatched" && " (in transit)"}
             </Alert>
@@ -231,8 +269,13 @@ export function TransfersPage() {
               {(transfers.data ?? []).map((r: TransferRow) => (
                 <TableRow key={r.id} sx={{ opacity: r.status === "cancelled" ? 0.5 : 1 }}>
                   <TableCell><code>{r.doc_no}</code></TableCell>
-                  <TableCell>{godownName(r.from_godown_id)}</TableCell>
-                  <TableCell>{godownName(r.to_godown_id)}</TableCell>
+                  <TableCell>{scope.godownLabel(r.from_godown_id)}</TableCell>
+                  <TableCell>
+                    {scope.godownLabel(r.to_godown_id)}
+                    {r.from_branch_id !== r.to_branch_id && (
+                      <Chip size="small" variant="outlined" label="branch" sx={{ ml: 0.5 }} />
+                    )}
+                  </TableCell>
                   <TableCell align="right">{r.line_count}</TableCell>
                   <TableCell align="right">{Number(r.total_qty)}</TableCell>
                   <TableCell>
