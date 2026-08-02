@@ -18,6 +18,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { errorMessage } from "../../lib/api";
 import { listProducts } from "../products/api";
 import { listUnits } from "../units/api";
 import { getCurrentStock, getMovements, listGodowns, listReorder, postAdjustment, reconcile, setReorder } from "./api";
@@ -84,8 +85,7 @@ export function StockPage() {
       qc.invalidateQueries({ queryKey: ["stock-movements", productId] });
     },
     onError: (e: unknown) => {
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(detail || "Adjustment failed");
+      setMsg(errorMessage(e, "Adjustment failed"));
     },
   });
 

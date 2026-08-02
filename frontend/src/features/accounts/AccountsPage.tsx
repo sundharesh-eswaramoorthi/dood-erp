@@ -18,6 +18,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { errorMessage } from "../../lib/api";
 import { listParties } from "../parties/api";
 import {
   createAccount,
@@ -117,8 +118,7 @@ export function AccountsPage() {
       qc.invalidateQueries({ queryKey: ["open-items"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Voucher failed");
+      setMsg(errorMessage(e, "Voucher failed"));
     },
   });
 
@@ -132,8 +132,7 @@ export function AccountsPage() {
       qc.invalidateQueries({ queryKey: ["expenses"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Expense failed");
+      setMsg(errorMessage(e, "Expense failed"));
     },
   });
 

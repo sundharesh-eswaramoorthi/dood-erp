@@ -19,6 +19,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { errorMessage } from "../../lib/api";
 import { listAccounts } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
@@ -142,8 +143,7 @@ export function PurchasePage() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(typeof d === "string" ? d : "Bill failed");
+      setMsg(errorMessage(e, "Bill failed"));
     },
   });
 
@@ -163,8 +163,7 @@ export function PurchasePage() {
       qc.invalidateQueries({ queryKey: ["stock-current"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Return failed");
+      setMsg(errorMessage(e, "Return failed"));
     },
   });
 
@@ -197,8 +196,7 @@ export function PurchasePage() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(typeof d === "string" ? d : "PO failed");
+      setMsg(errorMessage(e, "PO failed"));
     },
   });
 
@@ -214,8 +212,7 @@ export function PurchasePage() {
       qc.invalidateQueries({ queryKey: ["stock-current"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(typeof d === "string" ? d : "Receive failed");
+      setMsg(errorMessage(e, "Receive failed"));
     },
   });
   const cancelPO = useMutation({
@@ -225,8 +222,7 @@ export function PurchasePage() {
       qc.invalidateQueries({ queryKey: ["purchase-orders"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(typeof d === "string" ? d : "Cancel failed");
+      setMsg(errorMessage(e, "Cancel failed"));
     },
   });
 

@@ -19,6 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { errorMessage } from "../../lib/api";
 import { getPrintSettings, savePrintSettings, type PrintSettings } from "../printing/api";
 import { useState } from "react";
 
@@ -71,8 +72,7 @@ export function SettingsPage() {
   });
 
   const fail = (e: unknown) => {
-    const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-    setErr(typeof d === "string" ? d : "Action failed");
+    setErr(errorMessage(e, "Action failed"));
   };
   const refetchOrg = () => {
     setErr(null);

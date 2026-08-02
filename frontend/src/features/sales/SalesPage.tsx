@@ -23,6 +23,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { errorMessage } from "../../lib/api";
 import { billPayments, listAccounts } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
@@ -94,8 +95,7 @@ export function SalesPage() {
       qc.invalidateQueries({ queryKey: ["stock-current"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Order failed");
+      setMsg(errorMessage(e, "Order failed"));
     },
   });
 
@@ -116,8 +116,7 @@ export function SalesPage() {
       qc.invalidateQueries({ queryKey: ["stock-current"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(d || "Delivery failed");
+      setMsg(errorMessage(e, "Delivery failed"));
     },
   });
 
@@ -162,8 +161,7 @@ export function SalesPage() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(typeof d === "string" ? d : "Counter sale failed");
+      setMsg(errorMessage(e, "Counter sale failed"));
     },
   });
 
@@ -182,8 +180,7 @@ export function SalesPage() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: unknown) => {
-      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      setMsg(typeof d === "string" ? d : "Billing failed");
+      setMsg(errorMessage(e, "Billing failed"));
     },
   });
 

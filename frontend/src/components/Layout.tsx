@@ -27,9 +27,10 @@ import {
 } from "@mui/material";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../store/auth";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 const DRAWER_WIDTH = 216;
 const COLLAPSED_WIDTH = 60;
@@ -52,6 +53,7 @@ const NAV: { to: string; label: string; end: boolean; icon: ReactNode }[] = [
 export function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -169,7 +171,10 @@ export function Layout() {
       <Box component="main" sx={{ flexGrow: 1, width: { md: `calc(100% - ${COLLAPSED_WIDTH}px)` }, minWidth: 0 }}>
         <Toolbar />
         <Box sx={{ p: { xs: 2, sm: 3 }, maxWidth: "100%", overflowX: "auto" }}>
-          <Outlet />
+          {/* keyed on the route so navigating away clears a failed page */}
+          <ErrorBoundary key={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </Box>
       </Box>
     </Box>

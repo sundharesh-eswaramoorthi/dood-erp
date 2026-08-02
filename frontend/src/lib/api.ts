@@ -15,6 +15,32 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/** Turn any API failure into a string safe to render.
+ *
+ * FastAPI answers our own ValueErrors with a string `detail`, but a schema
+ * rejection answers with an ARRAY of {loc, msg} objects. Passing that array
+ * straight into JSX throws "Objects are not valid as a React child" and takes
+ * the whole page white, so every caller must come through here.
+ */
+export function errorMessage(e: unknown, fallback = "Something went wrong"): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        const { loc, msg } = (d ?? {}) as { loc?: unknown[]; msg?: string };
+        if (!msg) return null;
+        // loc is ["body", "password"] — the field name is the useful tail.
+        const field = Array.isArray(loc) ? loc.filter((p) => p !== "body").join(".") : "";
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  const msg = (e as { message?: string })?.message;
+  return msg || fallback;
+}
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {

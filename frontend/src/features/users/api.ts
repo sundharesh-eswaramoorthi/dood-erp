@@ -7,6 +7,7 @@ export interface User {
   is_superuser: boolean;
   is_active: boolean;
   roles: string[];
+  role_ids: number[];
   branch_ids: number[];
 }
 
@@ -36,6 +37,25 @@ export async function createUser(payload: {
   branch_ids: number[];
 }): Promise<User> {
   const { data } = await api.post<User>("/api/v1/users", payload);
+  return data;
+}
+
+export async function updateUser(
+  id: number,
+  payload: {
+    full_name?: string | null;
+    is_superuser?: boolean;
+    is_active?: boolean;
+    role_ids?: number[];
+    branch_ids?: number[];
+  },
+): Promise<User> {
+  const { data } = await api.put<User>(`/api/v1/users/${id}`, payload);
+  return data;
+}
+
+export async function resetPassword(id: number, password: string): Promise<User> {
+  const { data } = await api.post<User>(`/api/v1/users/${id}/password`, { password });
   return data;
 }
 
