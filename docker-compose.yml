@@ -1,3 +1,6 @@
+# The databases deliberately publish no host ports: the app reaches them over
+# the compose network by service name, and this stack is exposed through a
+# tunnel. Use `docker compose exec postgres psql -U cholavin` to get a shell.
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,7 +8,6 @@ services:
       POSTGRES_DB: cholavin
       POSTGRES_USER: cholavin
       POSTGRES_PASSWORD: cholavin
-    ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cholavin"]
@@ -15,7 +17,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -24,7 +25,6 @@ services:
 
   mongo:
     image: mongo:7
-    ports: ["27017:27017"]
     volumes: ["mongodata:/data/db"]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
