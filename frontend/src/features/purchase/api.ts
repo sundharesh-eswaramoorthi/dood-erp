@@ -15,8 +15,8 @@ export interface BillLineIn {
 
 export interface PurchaseBillCreate {
   supplier_id: number;
+  branch_id?: number;
   godown_id?: number;          // default godown for lines that omit one
-  supply_type?: string;
   supplier_invoice_no?: string;
   po_id?: number;
   bill_date?: string;
@@ -99,8 +99,8 @@ export interface PurchaseOrder {
 
 export interface POCreate {
   supplier_id: number;
+  branch_id?: number;
   godown_id?: number;
-  supply_type?: string;
   expected_date?: string | null;
   advance_amount?: string;
   payment_account_id?: number;

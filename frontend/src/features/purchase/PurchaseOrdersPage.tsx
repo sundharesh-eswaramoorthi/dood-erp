@@ -64,6 +64,7 @@ export function PurchaseOrdersPage() {
     mutationFn: () =>
       createOrder({
         supplier_id: Number(f.supplier),
+        branch_id: scope.branchId,
         godown_id: Number(f.godown) || undefined,
         expected_date: po.expected || null,
         advance_amount: po.advance || "0",

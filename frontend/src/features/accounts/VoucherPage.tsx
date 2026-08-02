@@ -74,6 +74,7 @@ export function VoucherPage({ kind }: { kind: "receipt" | "payment" }) {
         .filter(([, amt]) => amt && Number(amt) > 0)
         .map(([entry, amt]) => ({ against_entry_id: Number(entry), amount: amt }));
       return postVoucher({
+        branch_id: scope.branchId,
         party_id: Number(party),
         voucher_type: kind,
         note,

@@ -73,6 +73,7 @@ export function StockPage() {
   const adjust = useMutation({
     mutationFn: () =>
       postAdjustment({
+        branch_id: scope.branchId,
         godown_id: Number(form.godown_id),
         adj_reason: form.reason,
         lines: [

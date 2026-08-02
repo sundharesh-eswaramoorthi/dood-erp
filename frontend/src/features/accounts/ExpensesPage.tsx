@@ -50,6 +50,7 @@ export function ExpensesPage() {
   const add = useMutation({
     mutationFn: () =>
       postExpense({
+        branch_id: scope.branchId,
         account_id: Number(ex.account),
         amount: ex.amount,
         category_id: ex.category ? Number(ex.category) : null,

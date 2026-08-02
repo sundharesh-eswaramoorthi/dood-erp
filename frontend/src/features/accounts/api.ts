@@ -43,6 +43,7 @@ export interface VoucherResult {
 }
 
 export async function postVoucher(payload: {
+  branch_id?: number;
   party_id: number;
   voucher_type: string;
   note?: string;
@@ -92,6 +93,7 @@ export async function listExpenseCategories(): Promise<ExpenseCategory[]> {
 }
 
 export async function postExpense(payload: {
+  branch_id?: number;
   account_id: number;
   amount: string;
   category_id?: number | null;
