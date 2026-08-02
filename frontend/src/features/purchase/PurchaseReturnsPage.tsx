@@ -24,6 +24,7 @@ import { listParties } from "../parties/api";
 import { BranchFilter } from "../../components/BranchFilter";
 import { useBranchScope } from "../../components/useBranchScope";
 import { createReturn, listReturns, type PurchaseReturnRow } from "./api";
+import { invalidateDocument } from "../../app/refresh";
 
 const EMPTY = { supplier: "", godown: "", product: "", qty: "", rate: "", gst: "", unit_id: "" };
 
@@ -63,7 +64,7 @@ export function PurchaseReturnsPage() {
       setMsg(`Return ${b.doc_no}: ₹${b.grand_total} debited to the supplier (payable reduced)`);
       setR({ ...r, qty: "", rate: "" });
       qc.invalidateQueries({ queryKey: ["purchase-returns"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
+      invalidateDocument(qc);
     },
     onError: (e: unknown) => setMsg(errorMessage(e, "Return failed")),
   });

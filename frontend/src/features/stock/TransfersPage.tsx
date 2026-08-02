@@ -23,6 +23,7 @@ import { useEffect, useState } from "react";
 import { BranchFilter } from "../../components/BranchFilter";
 import { useBranchScope } from "../../components/useBranchScope";
 import { listProducts } from "../products/api";
+import { invalidateStock } from "../../app/refresh";
 import {
   createTransfer,
   createVerification,
@@ -90,7 +91,7 @@ export function TransfersPage() {
   const crossBranch =
     !!t.from && !!t.to && branchOfGodown(t.from) !== undefined &&
     branchOfGodown(t.from) !== branchOfGodown(t.to);
-  const refreshStock = () => qc.invalidateQueries({ queryKey: ["stock-current"] });
+  const refreshStock = () => invalidateStock(qc);
   const refreshList = () => qc.invalidateQueries({ queryKey: ["transfers"] });
 
   const mCreate = useMutation({

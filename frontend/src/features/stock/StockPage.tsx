@@ -25,6 +25,7 @@ import { errorMessage } from "../../lib/api";
 import { listProducts } from "../products/api";
 import { listUnits } from "../units/api";
 import { getCurrentStock, getMovements, listGodowns, listReorder, postAdjustment, reconcile, setReorder } from "./api";
+import { invalidateStock } from "../../app/refresh";
 
 const REASONS = ["opening", "increase", "decrease", "damage", "shortage"];
 const INBOUND = new Set(["opening", "increase"]);
@@ -88,8 +89,7 @@ export function StockPage() {
     onSuccess: () => {
       setForm({ ...form, qty: "", cost: "" });
       setMsg(null);
-      qc.invalidateQueries({ queryKey: ["stock-current", productId] });
-      qc.invalidateQueries({ queryKey: ["stock-movements", productId] });
+      invalidateStock(qc);
     },
     onError: (e: unknown) => {
       setMsg(errorMessage(e, "Adjustment failed"));

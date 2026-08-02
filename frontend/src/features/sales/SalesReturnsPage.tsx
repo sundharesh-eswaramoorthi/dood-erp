@@ -19,6 +19,7 @@ import { errorMessage } from "../../lib/api";
 import { createReturn, listReturns, type SalesReturn } from "./api";
 import { SaleDocumentCard } from "./SaleDocumentCard";
 import { useSalesHeader } from "./useSalesHeader";
+import { invalidateDocument } from "../../app/refresh";
 
 type Note = { text: string; severity: "success" | "error" };
 
@@ -65,8 +66,7 @@ export function SalesReturnsPage() {
             severity: "success",
           });
           qc.invalidateQueries({ queryKey: ["sales-returns"] });
-          qc.invalidateQueries({ queryKey: ["stock-current"] });
-          qc.invalidateQueries({ queryKey: ["accounts"] });
+          invalidateDocument(qc);
         }}
         onError={(e) => setNote({ text: errorMessage(e, "Could not post the return"), severity: "error" })}
       />

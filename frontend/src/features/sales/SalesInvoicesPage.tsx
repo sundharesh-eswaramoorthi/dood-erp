@@ -25,6 +25,7 @@ import { billOrder, createDirectBill, listBills, listOrders, type SalesBill } fr
 import { BillDialog } from "./BillDialog";
 import { SaleDocumentCard } from "./SaleDocumentCard";
 import { useSalesHeader } from "./useSalesHeader";
+import { invalidateDocument } from "../../app/refresh";
 
 type Note = { text: string; severity: "success" | "error" | "warning" };
 
@@ -61,8 +62,7 @@ export function SalesInvoicesPage() {
       setBilling(null);
       qc.invalidateQueries({ queryKey: ["sales-bills"] });
       qc.invalidateQueries({ queryKey: ["sale-orders"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
-      qc.invalidateQueries({ queryKey: ["accounts"] });
+      invalidateDocument(qc);
     },
     onError: (e) => fail(e, "Could not post the bill"),
   });
@@ -104,8 +104,7 @@ export function SalesInvoicesPage() {
             severity: b.credit_warning ? "warning" : "success",
           });
           qc.invalidateQueries({ queryKey: ["sales-bills"] });
-          qc.invalidateQueries({ queryKey: ["stock-current"] });
-          qc.invalidateQueries({ queryKey: ["accounts"] });
+          invalidateDocument(qc);
           // v2 §4: a counter sale ends with paper in the customer's hand
           window.open(`/print/sales_bill/${b.id}`, "_blank");
         }}

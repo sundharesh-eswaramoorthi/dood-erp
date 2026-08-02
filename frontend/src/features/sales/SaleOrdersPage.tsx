@@ -20,6 +20,7 @@ import { errorMessage } from "../../lib/api";
 import { cancelOrder, createOrder, deliverOrder, listOrders, type SaleOrder } from "./api";
 import { SaleDocumentCard } from "./SaleDocumentCard";
 import { useSalesHeader } from "./useSalesHeader";
+import { invalidateStock } from "../../app/refresh";
 
 const STATUS_COLOR: Record<string, "warning" | "success" | "default"> = {
   pending: "warning",
@@ -43,7 +44,7 @@ export function SaleOrdersPage() {
     onSuccess: () => {
       setNote({ text: "Order cancelled — reservation released.", severity: "success" });
       qc.invalidateQueries({ queryKey: ["sale-orders"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
+      invalidateStock(qc);
     },
     onError: (e) => fail(e, "Could not cancel the order"),
   });
@@ -56,7 +57,7 @@ export function SaleOrdersPage() {
         severity: "success",
       });
       qc.invalidateQueries({ queryKey: ["sale-orders"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
+      invalidateStock(qc);
     },
     onError: (e) => fail(e, "Could not dispatch the delivery"),
   });
@@ -94,7 +95,7 @@ export function SaleOrdersPage() {
             severity: o.credit_warning ? "warning" : "success",
           });
           qc.invalidateQueries({ queryKey: ["sale-orders"] });
-          qc.invalidateQueries({ queryKey: ["stock-current"] });
+          invalidateStock(qc);
         }}
         onError={(e) => fail(e, "Could not place the order")}
       />

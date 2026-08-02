@@ -28,6 +28,7 @@ import { type ProductUnit } from "../products/api";
 import { BranchFilter } from "../../components/BranchFilter";
 import { useBranchScope } from "../../components/useBranchScope";
 import { createBill, listBills, type PurchaseBill } from "./api";
+import { invalidateDocument } from "../../app/refresh";
 
 /** One editable invoice line (v2 §3: godown, qty, rate, discount, HSN, remarks). */
 interface DraftLine {
@@ -116,8 +117,7 @@ export function PurchaseBillsPage() {
       setLines([{ ...EMPTY_LINE }]);
       setMny({ ...EMPTY_MONEY });
       qc.invalidateQueries({ queryKey: ["purchase-bills"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
-      qc.invalidateQueries({ queryKey: ["accounts"] });
+      invalidateDocument(qc);
     },
     onError: (e: unknown) => setMsg(errorMessage(e, "Bill failed")),
   });
