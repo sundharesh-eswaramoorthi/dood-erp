@@ -125,3 +125,36 @@ export async function createDirectBill(
   });
   return data as BilledOut & { doc_no: string | null };
 }
+
+/** v2 §4 sales return (credit note): goods back in, party credited. */
+export interface SalesReturn {
+  id: number;
+  doc_no: string | null;
+  status: string;
+  customer_id: number;
+  orig_bill_id: number | null;
+  grand_total: string;
+  paid_amount?: string;
+  balance_amount?: string;
+  return_date?: string;
+}
+
+export async function createReturn(
+  payload: {
+    customer_id: number;
+    branch_id?: number;
+    orig_bill_id?: number;
+    supply_type?: string;
+    lines: SaleLineIn[];
+  } & Record<string, unknown>,
+): Promise<SalesReturn & BilledOut> {
+  const { data } = await api.post("/api/v1/sales/returns", payload, {
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+  });
+  return data as SalesReturn & BilledOut;
+}
+
+export async function listReturns(): Promise<SalesReturn[]> {
+  const { data } = await api.get<SalesReturn[]>("/api/v1/sales/returns");
+  return data;
+}

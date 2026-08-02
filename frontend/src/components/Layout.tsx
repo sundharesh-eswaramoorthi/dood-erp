@@ -1,4 +1,6 @@
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import AssessmentIcon from "@mui/icons-material/Assessment";
 import GroupsIcon from "@mui/icons-material/Groups";
 import Inventory2Icon from "@mui/icons-material/Inventory2";
@@ -15,6 +17,7 @@ import {
   AppBar,
   Box,
   Button,
+  Collapse,
   Divider,
   Drawer,
   IconButton,
@@ -35,19 +38,56 @@ import { ErrorBoundary } from "./ErrorBoundary";
 const DRAWER_WIDTH = 216;
 const COLLAPSED_WIDTH = 60;
 
-const NAV: { to: string; label: string; end: boolean; icon: ReactNode }[] = [
+interface NavItem {
+  to?: string;
+  label: string;
+  end?: boolean;
+  icon: ReactNode;
+  /** a group opens to reveal its documents rather than navigating itself */
+  children?: { to: string; label: string }[];
+}
+
+// v2 §3/§4: an order, an invoice and a return are different documents with
+// different rules, so each gets its own screen — and the sidebar groups them
+// rather than growing to eighteen flat entries.
+const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", end: true, icon: <SpaceDashboardIcon /> },
-  { to: "/parties", label: "Parties", end: false, icon: <GroupsIcon /> },
-  { to: "/products", label: "Products", end: false, icon: <Inventory2Icon /> },
-  { to: "/stock", label: "Stock", end: false, icon: <WarehouseIcon /> },
-  { to: "/purchase", label: "Purchase", end: false, icon: <ShoppingCartIcon /> },
-  { to: "/sales", label: "Sales", end: false, icon: <PointOfSaleIcon /> },
-  { to: "/accounts", label: "Accounts", end: false, icon: <AccountBalanceWalletIcon /> },
-  { to: "/reports", label: "Reports", end: false, icon: <AssessmentIcon /> },
-  { to: "/transfers", label: "Transfers", end: false, icon: <SwapHorizIcon /> },
-  { to: "/units", label: "Units", end: false, icon: <StraightenIcon /> },
-  { to: "/users", label: "Users", end: false, icon: <ManageAccountsIcon /> },
-  { to: "/settings", label: "Settings", end: false, icon: <SettingsIcon /> },
+  { to: "/parties", label: "Parties", icon: <GroupsIcon /> },
+  { to: "/products", label: "Products", icon: <Inventory2Icon /> },
+  { to: "/stock", label: "Stock", icon: <WarehouseIcon /> },
+  {
+    label: "Purchase",
+    icon: <ShoppingCartIcon />,
+    children: [
+      { to: "/purchase/orders", label: "Purchase orders" },
+      { to: "/purchase/bills", label: "Purchase bills" },
+      { to: "/purchase/returns", label: "Purchase returns" },
+    ],
+  },
+  {
+    label: "Sales",
+    icon: <PointOfSaleIcon />,
+    children: [
+      { to: "/sales/orders", label: "Sale orders" },
+      { to: "/sales/invoices", label: "Sales invoices" },
+      { to: "/sales/returns", label: "Sales returns" },
+    ],
+  },
+  {
+    label: "Accounts",
+    icon: <AccountBalanceWalletIcon />,
+    children: [
+      { to: "/accounts/bank", label: "Bank & cash" },
+      { to: "/accounts/payment-in", label: "Payment in" },
+      { to: "/accounts/payment-out", label: "Payment out" },
+      { to: "/accounts/expenses", label: "Expenses" },
+    ],
+  },
+  { to: "/reports", label: "Reports", icon: <AssessmentIcon /> },
+  { to: "/transfers", label: "Transfers", icon: <SwapHorizIcon /> },
+  { to: "/units", label: "Units", icon: <StraightenIcon /> },
+  { to: "/users", label: "Users", icon: <ManageAccountsIcon /> },
+  { to: "/settings", label: "Settings", icon: <SettingsIcon /> },
 ];
 
 export function Layout() {
@@ -56,44 +96,103 @@ export function Layout() {
   const { pathname } = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
+
+  const itemSx = (showLabels: boolean, nested = false) => ({
+    borderRadius: 1.5,
+    mb: 0.25,
+    minHeight: nested ? 36 : 44,
+    px: 1.25,
+    pl: nested && showLabels ? 5.5 : 1.25,
+    justifyContent: showLabels ? "initial" : "center",
+    color: "text.secondary",
+    "&.active": {
+      bgcolor: "action.selected",
+      borderRight: "3px solid",
+      borderColor: "secondary.main",
+      color: "primary.main",
+      "& .MuiListItemText-primary": { fontWeight: 700 },
+      "& .MuiListItemIcon-root": { color: "primary.main" },
+    },
+  });
 
   const navList = (showLabels: boolean) => (
     <List sx={{ px: 1 }}>
-      {NAV.map((n) => (
-        <ListItemButton
-          key={n.to}
-          component={NavLink}
-          to={n.to}
-          end={n.end}
-          onClick={() => setMobileOpen(false)}
-          title={n.label}
-          sx={{
-            borderRadius: 1.5,
-            mb: 0.25,
-            minHeight: 44,
-            px: 1.25,
-            justifyContent: showLabels ? "initial" : "center",
-            color: "text.secondary",
-            "&.active": {
-              bgcolor: "action.selected",
-              borderRight: "3px solid",
-              borderColor: "secondary.main",
-              color: "primary.main",
-              "& .MuiListItemText-primary": { fontWeight: 700 },
-              "& .MuiListItemIcon-root": { color: "primary.main" },
-            },
-          }}
-        >
-          <ListItemIcon sx={{ minWidth: 0, mr: showLabels ? 2 : "auto", justifyContent: "center", color: "inherit" }}>
-            {n.icon}
-          </ListItemIcon>
-          <ListItemText
-            primary={n.label}
-            sx={{ opacity: showLabels ? 1 : 0, whiteSpace: "nowrap" }}
-            primaryTypographyProps={{ fontSize: 14.5 }}
-          />
-        </ListItemButton>
-      ))}
+      {NAV.map((n) => {
+        if (!n.children) {
+          return (
+            <ListItemButton
+              key={n.to}
+              component={NavLink}
+              to={n.to!}
+              end={n.end}
+              onClick={() => setMobileOpen(false)}
+              title={n.label}
+              sx={itemSx(showLabels)}
+            >
+              <ListItemIcon sx={{ minWidth: 0, mr: showLabels ? 2 : "auto", justifyContent: "center", color: "inherit" }}>
+                {n.icon}
+              </ListItemIcon>
+              <ListItemText
+                primary={n.label}
+                sx={{ opacity: showLabels ? 1 : 0, whiteSpace: "nowrap" }}
+                primaryTypographyProps={{ fontSize: 14.5 }}
+              />
+            </ListItemButton>
+          );
+        }
+
+        // A group is open when you are inside it, or when you asked for it.
+        // Collapsed to icons there is nowhere to put children, so the rail
+        // shows the group icon alone and hovering reveals the list.
+        const inside = n.children.some((c) => pathname.startsWith(c.to));
+        const open = showLabels && (inside || openGroups.includes(n.label));
+        return (
+          <Box key={n.label}>
+            <ListItemButton
+              onClick={() =>
+                setOpenGroups((g) =>
+                  g.includes(n.label) ? g.filter((x) => x !== n.label) : [...g, n.label],
+                )
+              }
+              title={n.label}
+              sx={{
+                ...itemSx(showLabels),
+                ...(inside ? { color: "primary.main" } : null),
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 0, mr: showLabels ? 2 : "auto", justifyContent: "center", color: "inherit" }}>
+                {n.icon}
+              </ListItemIcon>
+              <ListItemText
+                primary={n.label}
+                sx={{ opacity: showLabels ? 1 : 0, whiteSpace: "nowrap" }}
+                primaryTypographyProps={{ fontSize: 14.5, fontWeight: inside ? 700 : 400 }}
+              />
+              {showLabels && (open ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />)}
+            </ListItemButton>
+            <Collapse in={open} timeout="auto" unmountOnExit>
+              <List disablePadding>
+                {n.children.map((c) => (
+                  <ListItemButton
+                    key={c.to}
+                    component={NavLink}
+                    to={c.to}
+                    onClick={() => setMobileOpen(false)}
+                    sx={itemSx(showLabels, true)}
+                  >
+                    <ListItemText
+                      primary={c.label}
+                      sx={{ whiteSpace: "nowrap" }}
+                      primaryTypographyProps={{ fontSize: 13.5 }}
+                    />
+                  </ListItemButton>
+                ))}
+              </List>
+            </Collapse>
+          </Box>
+        );
+      })}
     </List>
   );
 

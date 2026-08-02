@@ -194,6 +194,14 @@ async def list_bills(
     return await service.list_bills(session, principal)
 
 
+@router.get("/returns")
+async def list_returns(
+    principal: Principal = Depends(require_permission("sales.read")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_returns(session, principal)
+
+
 @router.post("/returns", response_model=SalesReturnOut, status_code=201)
 async def create_return(
     payload: SalesReturnCreate,

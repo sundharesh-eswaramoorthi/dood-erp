@@ -152,3 +152,19 @@ export async function cancelOrder(id: number): Promise<PurchaseOrder> {
   const { data } = await api.post<PurchaseOrder>(`/api/v1/purchase/orders/${id}/cancel`);
   return data;
 }
+
+/** Debit notes could be posted but never listed until V2.15. */
+export interface PurchaseReturnRow {
+  id: number;
+  doc_no: string | null;
+  status: string;
+  supplier_id: number;
+  orig_bill_id: number | null;
+  grand_total: string;
+  return_date?: string;
+}
+
+export async function listReturns(): Promise<PurchaseReturnRow[]> {
+  const { data } = await api.get<PurchaseReturnRow[]>("/api/v1/purchase/returns");
+  return data;
+}

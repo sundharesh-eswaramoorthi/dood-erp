@@ -178,3 +178,8 @@ export async function billPayments(
   const { data } = await api.get<PaymentHistory>(`/api/v1/${kind}/bills/${billId}/payments`);
   return data;
 }
+
+export async function createExpenseCategory(payload: { name: string }): Promise<ExpenseCategory> {
+  const { data } = await api.post<ExpenseCategory>("/api/v1/accounts/expense-categories", payload);
+  return data;
+}

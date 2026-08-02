@@ -833,3 +833,17 @@ async def amend_bill(
     await emit(session, principal.org_id, "sale.bill.amended",
                {"old_bill_id": bill_id, "new_bill_id": new["id"], "reason": reason})
     return {**new, "amended_from": bill_id, "revision_no": int(old["revision_no"]) + 1}
+
+
+async def list_returns(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+    """Credit notes could be posted but never listed — the endpoint existed
+    without a way to see what it had produced."""
+    rows = (
+        await session.execute(
+            text("SELECT id, doc_no, customer_id, orig_bill_id, grand_total, paid_amount, "
+                 "balance_amount, return_date, status FROM sales_return ORDER BY id DESC LIMIT :l"),
+            {"l": limit},
+        )
+    ).mappings().all()
+    m = ("grand_total", "paid_amount", "balance_amount")
+    return [{k: (str(v) if k in m and v is not None else v) for k, v in r.items()} for r in rows]
