@@ -41,6 +41,8 @@ async def create_account(
 ):
     try:
         return await service.create_account(session, principal, payload)
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 

@@ -5,6 +5,7 @@ export interface Account {
   name: string;
   account_type: string;
   current_balance: string;
+  branch_id: number;
 }
 
 export interface Voucher {
@@ -26,6 +27,8 @@ export async function createAccount(payload: {
   name: string;
   account_type: string;
   opening_balance: string;
+  /** accounts are branch-scoped; omitted it defaults to your own branch */
+  branch_id?: number;
 }): Promise<Account> {
   const { data } = await api.post<Account>("/api/v1/accounts/bank-accounts", payload);
   return data;

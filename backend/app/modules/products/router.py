@@ -52,6 +52,7 @@ async def products_list(
     category_id: int | None = None,
     is_active: bool | None = None,
     low_stock: bool | None = None,
+    branch_id: int | None = None,
     sort: str = "name",
     direction: str = "asc",
     limit: int = 200,
@@ -61,7 +62,7 @@ async def products_list(
 ):
     return await list_products(
         session, principal, q,
-        category_id=category_id, is_active=is_active, low_stock=low_stock,
+        category_id=category_id, is_active=is_active, low_stock=low_stock, branch_id=branch_id,
         sort=sort, direction=direction, limit=limit, offset=offset,
     )
 

@@ -116,6 +116,14 @@ async def seed() -> None:
                     o=org_id, n="Main Branch",
                 )
 
+            # Widen the scope now the branch exists: since V2.16 godowns and
+            # cash/bank accounts are branch-scoped too, and the seed writes both.
+            # Setting only app.org_id leaves branch_ids empty, and the very next
+            # INSERT is refused by its own policy.
+            await s.execute(
+                text("SELECT set_config('app.branch_ids', :b, true)"), {"b": str(branch_id)}
+            )
+
             for gname in ("Main Godown", "Secondary Godown"):
                 exists_g = await _scalar(
                     s, "SELECT id FROM godown WHERE branch_id=:b AND name=:n", b=branch_id, n=gname
@@ -256,10 +264,10 @@ async def seed() -> None:
             for aname, atype in [("Cash", "cash"), ("HDFC Bank", "bank"), ("Petty Cash", "petty_cash")]:
                 await s.execute(
                     text(
-                        "INSERT INTO cash_bank_account (org_id, name, account_type) VALUES (:o, :n, :t) "
-                        "ON CONFLICT (org_id, name) DO NOTHING"
+                        "INSERT INTO cash_bank_account (org_id, branch_id, name, account_type) "
+                        "VALUES (:o, :b, :n, :t) ON CONFLICT (org_id, name) DO NOTHING"
                     ),
-                    {"o": org_id, "n": aname, "t": atype},
+                    {"o": org_id, "b": branch_id, "n": aname, "t": atype},
                 )
             # Payment types (v2 §3). Migration 0022 seeds these by CROSS JOIN on
             # organization, which finds nothing on a fresh database — migrations

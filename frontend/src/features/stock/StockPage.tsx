@@ -18,6 +18,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { type Godown } from "./api";
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { errorMessage } from "../../lib/api";
 import { listProducts } from "../products/api";
 import { listUnits } from "../units/api";
@@ -30,7 +33,10 @@ export function StockPage() {
   const qc = useQueryClient();
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
+  const scope = useBranchScope();
+  // godowns of the selected branch only — posting into another
+  // branch's godown is refused by the server anyway
+  const godowns: { data: Godown[] } = { data: scope.godowns };
 
   const [productId, setProductId] = useState<number | "">("");
   const [form, setForm] = useState({ godown_id: "", reason: "opening", qty: "", unit_id: "", cost: "" });
@@ -114,6 +120,12 @@ export function StockPage() {
         <Typography variant="h4" fontWeight={800}>
           Stock
         </Typography>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="stock figures below are this branch's"
+      />
         <Button variant="outlined" onClick={() => verify.mutate()} sx={{ ml: "auto" }}>
           Verify integrity
         </Button>

@@ -23,7 +23,8 @@ import { errorMessage } from "../../lib/api";
 import { listAccounts } from "../accounts/api";
 import { listParties } from "../parties/api";
 import { getFeatureFlags } from "../settings/api";
-import { listGodowns } from "../stock/api";
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import {
   cancelOrder,
   createOrder,
@@ -35,7 +36,10 @@ import {
 export function PurchaseOrdersPage() {
   const qc = useQueryClient();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
+  const scope = useBranchScope();
+  // godowns of the selected branch only — posting into another
+  // branch's godown is refused by the server anyway
+  const godowns = { data: scope.godowns };
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const flags = useQuery({ queryKey: ["feature-flags"], queryFn: getFeatureFlags });
   const orders = useQuery({
@@ -127,6 +131,12 @@ export function PurchaseOrdersPage() {
           An order commits to buy; receiving it raises the bill and moves the stock.
         </Typography>
       </Box>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="ordered for this branch"
+      />
       {msg && (
         <Alert severity={msg.includes("failed") ? "error" : "success"} onClose={() => setMsg(null)}>
           {msg}

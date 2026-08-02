@@ -12,6 +12,9 @@ class AccountCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     account_type: str = Field(pattern="^(bank|cash|petty_cash)$")
     opening_balance: Decimal = Field(default=Decimal(0))
+    # v2.16: accounts are branch-scoped, so one has to say whose it is.
+    # Omitted, it belongs to the caller's own branch.
+    branch_id: int | None = None
 
 
 class AccountOut(BaseModel):
@@ -21,6 +24,7 @@ class AccountOut(BaseModel):
     name: str
     account_type: str
     current_balance: Decimal
+    branch_id: int
 
 
 class AllocationIn(BaseModel):

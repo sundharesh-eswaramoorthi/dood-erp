@@ -81,6 +81,8 @@ export interface ProductFilters {
   sort?: string;
   direction?: "asc" | "desc";
   limit?: number;
+  /** narrows stock qty/value/low-stock to one branch */
+  branch_id?: number;
 }
 
 export async function listProducts(filters: ProductFilters | string = {}): Promise<Product[]> {

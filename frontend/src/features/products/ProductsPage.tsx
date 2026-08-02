@@ -26,6 +26,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { useAuth } from "../../store/auth";
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { listGodowns } from "../stock/api";
 import { listBranches } from "../users/api";
 import { listUnits } from "../units/api";
@@ -77,6 +79,7 @@ export function ProductsPage() {
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const godowns = useQuery({ queryKey: ["godowns", "all"], queryFn: () => listGodowns(true) });
   const { user: me } = useAuth();
+  const scope = useBranchScope();
   const allBranches = useQuery({ queryKey: ["branches"], queryFn: listBranches });
   // offering a branch the user cannot post into just earns them a 403
   const branches = {
@@ -88,7 +91,7 @@ export function ProductsPage() {
     (g) => String(g.branch_id) === form.opening_branch_id,
   );
   const categories = useQuery({ queryKey: ["categories"], queryFn: listCategories });
-  const products = useQuery({ queryKey: ["products", filters], queryFn: () => listProducts(filters) });
+  const products = useQuery({ queryKey: ["products", filters, scope.branchId], queryFn: () => listProducts({ ...filters, branch_id: scope.branchId }) });
 
   const unitCode = useMemo(() => {
     const m = new Map<number, string>();
@@ -339,6 +342,14 @@ export function ProductsPage() {
             <Typography variant="h6" sx={{ flexGrow: 1 }}>Product list</Typography>
             <TextField size="small" label="Search" placeholder="name, code, HSN"
               value={filters.q ?? ""} onChange={(e) => patch("q", e.target.value)} sx={{ minWidth: 200 }} />
+            {/* the catalogue is org-wide; this narrows the stock columns only */}
+            <BranchFilter
+              value={scope.branch}
+              onChange={scope.setBranch}
+              branches={scope.branches}
+              helperText="stock shown is this branch's"
+              width={170}
+            />
             <TextField size="small" label="Category" select value={filters.category_id ?? ""}
               onChange={(e) => patch("category_id", e.target.value ? Number(e.target.value) : "")}
               sx={{ minWidth: 150 }}>

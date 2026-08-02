@@ -18,6 +18,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { errorMessage } from "../../lib/api";
 import {
   createAccount,
@@ -32,6 +34,7 @@ import {
  *  swipe and a bank transfer can land in the same account. */
 export function BankAccountsPage() {
   const qc = useQueryClient();
+  const scope = useBranchScope();
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
 
@@ -45,6 +48,7 @@ export function BankAccountsPage() {
         name: acc.name,
         account_type: acc.account_type,
         opening_balance: acc.opening || "0",
+        branch_id: scope.branchId,
       }),
     onSuccess: () => {
       setAcc({ name: "", account_type: "bank", opening: "0" });
@@ -71,11 +75,16 @@ export function BankAccountsPage() {
       <Card>
         <CardContent>
           <Typography variant="h6" gutterBottom>Accounts</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+            Each account belongs to a branch and only that branch can pay in or out of
+            it. A new branch starts with none, so create its cash account here first.
+          </Typography>
           <Table size="small" sx={{ mb: 2 }}>
             <TableHead>
               <TableRow>
                 <TableCell>Name</TableCell>
                 <TableCell>Type</TableCell>
+                <TableCell>Branch</TableCell>
                 <TableCell align="right">Balance</TableCell>
               </TableRow>
             </TableHead>
@@ -86,6 +95,7 @@ export function BankAccountsPage() {
                   <TableCell>
                     <Chip size="small" variant="outlined" label={a.account_type.replace("_", " ")} />
                   </TableCell>
+                  <TableCell>{scope.branchName(a.branch_id)}</TableCell>
                   <TableCell align="right" sx={{ fontVariantNumeric: "tabular-nums" }}>
                     ₹{a.current_balance}
                   </TableCell>
@@ -93,7 +103,7 @@ export function BankAccountsPage() {
               ))}
               {(accounts.data ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={3}>
+                  <TableCell colSpan={4}>
                     <Typography color="text.secondary">No accounts yet.</Typography>
                   </TableCell>
                 </TableRow>
@@ -112,6 +122,12 @@ export function BankAccountsPage() {
               </TextField>
               <TextField size="small" label="Opening" value={acc.opening}
                 onChange={(e) => setAcc({ ...acc, opening: e.target.value })} sx={{ width: 120 }} />
+              <BranchFilter
+                value={scope.branch}
+                onChange={scope.setBranch}
+                branches={scope.branches}
+                helperText="the account belongs to this branch"
+              />
               <Button type="submit" variant="outlined" disabled={addAcc.isPending}>Add account</Button>
             </Stack>
           </Box>

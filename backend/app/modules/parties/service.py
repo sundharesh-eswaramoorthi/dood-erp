@@ -113,9 +113,9 @@ async def _require_branch(session: AsyncSession, principal: Principal, branch_id
 async def create_party(
     session: AsyncSession, principal: Principal, data: PartyCreate, idem_key: str | None
 ) -> Party:
-    # v2 §9: parties stay visible org-wide, so this is the *serving* branch —
-    # who looks after them, not who may see them. It must still be a branch
-    # this user works in.
+    # v2.16: the serving branch IS the visibility boundary — only this branch
+    # sees this party. Reversal of the v2 §9 all-branch model, accepted with
+    # the cost that a customer buying from two branches needs a record in each.
     branch_id = data.serving_branch_id
     await _require_branch(session, principal, branch_id)
 
@@ -192,8 +192,11 @@ async def update_party(
 
     # moving a party to a branch you cannot work in is the same hole as
     # creating one there
+    moved_to = None
     if "serving_branch_id" in fields and fields["serving_branch_id"] is not None:
         await _require_branch(session, principal, fields["serving_branch_id"])
+        if fields["serving_branch_id"] != party.serving_branch_id:
+            moved_to = fields["serving_branch_id"]
 
     # Opening balance is ledger-backed: correct it by reversing the old posting
     # and writing a fresh one, never by editing history.
@@ -235,6 +238,19 @@ async def update_party(
         )
 
     await session.flush()
+
+    # Contacts, addresses, documents and GST registrations carry their own
+    # branch_id, and branch RLS now reads it. Moving the party without moving
+    # them would leave the details behind in a branch that can no longer see
+    # the party they belong to — they would simply disappear.
+    if moved_to is not None:
+        for child in ("party_contact", "party_address", "party_document",
+                      "party_gst_registration"):
+            await session.execute(
+                text(f"UPDATE {child} SET branch_id = :b WHERE party_id = :p"),
+                {"b": moved_to, "p": party.id},
+            )
+
     await emit(session, principal.org_id, "party.updated",
                {"party_id": party.id, "fields": sorted(fields), "by": principal.user_id})
     return party

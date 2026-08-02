@@ -21,7 +21,8 @@ import { useEffect, useState } from "react";
 import { ProductPicker } from "../../components/ProductPicker";
 import { errorMessage } from "../../lib/api";
 import { listParties } from "../parties/api";
-import { listGodowns } from "../stock/api";
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { createReturn, listReturns, type PurchaseReturnRow } from "./api";
 
 const EMPTY = { supplier: "", godown: "", supply_type: "intra", product: "", qty: "", rate: "", gst: "", unit_id: "" };
@@ -30,7 +31,10 @@ const EMPTY = { supplier: "", godown: "", supply_type: "intra", product: "", qty
 export function PurchaseReturnsPage() {
   const qc = useQueryClient();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
+  const scope = useBranchScope();
+  // godowns of the selected branch only — posting into another
+  // branch's godown is refused by the server anyway
+  const godowns = { data: scope.godowns };
   const returns = useQuery({ queryKey: ["purchase-returns"], queryFn: listReturns });
 
   const [r, setR] = useState(EMPTY);
@@ -72,6 +76,12 @@ export function PurchaseReturnsPage() {
           A debit note: stock leaves the godown and the supplier's payable falls.
         </Typography>
       </Box>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="goods leave this branch"
+      />
       {msg && (
         <Alert severity={msg.startsWith("Return") ? "success" : "error"} onClose={() => setMsg(null)}>
           {msg}

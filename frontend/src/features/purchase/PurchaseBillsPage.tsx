@@ -25,7 +25,8 @@ import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../mo
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
 import { type ProductUnit } from "../products/api";
-import { listGodowns } from "../stock/api";
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { createBill, listBills, type PurchaseBill } from "./api";
 
 /** One editable invoice line (v2 §3: godown, qty, rate, discount, HSN, remarks). */
@@ -52,7 +53,10 @@ const EMPTY_LINE: DraftLine = {
 export function PurchaseBillsPage() {
   const qc = useQueryClient();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
+  const scope = useBranchScope();
+  // godowns of the selected branch only — posting into another
+  // branch's godown is refused by the server anyway
+  const godowns = { data: scope.godowns };
   const bills = useQuery({ queryKey: ["purchase-bills"], queryFn: listBills });
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
@@ -128,6 +132,12 @@ export function PurchaseBillsPage() {
           credited, and anything paid now leaves an account — one transaction.
         </Typography>
       </Box>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="goods arrive into this branch"
+      />
       {msg && (
         <Alert severity={msg.startsWith("Posted") ? "success" : "error"} onClose={() => setMsg(null)}>
           {msg}

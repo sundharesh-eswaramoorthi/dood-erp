@@ -50,6 +50,7 @@ async def list_products(
     category_id: int | None = None,
     is_active: bool | None = None,
     low_stock: bool | None = None,
+    branch_id: int | None = None,
     sort: str = "name",
     direction: str = "asc",
     limit: int = 200,
@@ -62,6 +63,14 @@ async def list_products(
     """
     where = ["TRUE"]
     params: dict = {"limit": min(limit, 500), "offset": max(offset, 0)}
+    # The catalogue is org-wide on purpose — one item, stocked by any branch,
+    # which is what makes a branch-to-branch transfer possible at all. Branch
+    # enters here: it narrows the quantity, value and low-stock figures to one
+    # branch instead of summing every branch the caller can see.
+    branch_sql = ""
+    if branch_id is not None:
+        branch_sql = " AND branch_id = :branch"
+        params["branch"] = branch_id
     if q:
         where.append("(p.name ILIKE :q OR p.code ILIKE :q OR p.hsn_code ILIKE :q)")
         params["q"] = f"%{q}%"
@@ -81,11 +90,13 @@ async def list_products(
             text(
                 "WITH bal AS ("
                 "  SELECT product_id, SUM(on_hand) AS qty FROM stock_balance "
-                "  WHERE location_state='on_hand' GROUP BY product_id"
+                f"  WHERE location_state='on_hand'{branch_sql} GROUP BY product_id"
                 "), cost AS ("
-                "  SELECT product_id, MAX(moving_avg_cost) AS avg_cost FROM product_cost GROUP BY product_id"
+                "  SELECT product_id, MAX(moving_avg_cost) AS avg_cost FROM product_cost "
+                f"  WHERE TRUE{branch_sql} GROUP BY product_id"
                 "), thr AS ("
-                "  SELECT product_id, MIN(min_qty) AS min_qty FROM reorder_threshold GROUP BY product_id"
+                "  SELECT product_id, MIN(min_qty) AS min_qty FROM reorder_threshold "
+                f"  WHERE TRUE{branch_sql} GROUP BY product_id"
                 ") "
                 "SELECT * FROM ("
                 "  SELECT p.*, "

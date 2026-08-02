@@ -35,20 +35,28 @@ from app.services.party_ledger import post_entry as post_party_entry
 async def list_accounts(session: AsyncSession, principal: Principal) -> list[dict]:
     rows = (
         await session.execute(
-            text("SELECT id, name, account_type, current_balance FROM cash_bank_account "
-                 "WHERE is_active ORDER BY name")
+            text("SELECT id, name, account_type, current_balance, branch_id "
+                 "FROM cash_bank_account WHERE is_active ORDER BY name")
         )
     ).mappings().all()
     return [dict(r) for r in rows]
 
 
 async def create_account(session: AsyncSession, principal: Principal, data: AccountCreate) -> dict:
+    branch_id = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
+    if branch_id is None:
+        raise ValueError("Caller has no branch access")
+    if branch_id not in principal.branch_ids:
+        raise PermissionError(f"You do not have access to branch {branch_id}")
     try:
         row = (
             await session.execute(
-                text("INSERT INTO cash_bank_account (org_id, name, account_type, opening_balance, current_balance) "
-                     "VALUES (:o,:n,:t,:ob,:ob) RETURNING id, name, account_type, current_balance"),
-                {"o": principal.org_id, "n": data.name, "t": data.account_type, "ob": data.opening_balance},
+                text("INSERT INTO cash_bank_account (org_id, branch_id, name, account_type, "
+                     "opening_balance, current_balance) "
+                     "VALUES (:o,:b,:n,:t,:ob,:ob) "
+                     "RETURNING id, name, account_type, current_balance, branch_id"),
+                {"o": principal.org_id, "b": branch_id, "n": data.name,
+                 "t": data.account_type, "ob": data.opening_balance},
             )
         ).mappings().one()
     except IntegrityError as e:

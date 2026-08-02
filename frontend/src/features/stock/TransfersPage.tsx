@@ -13,21 +13,26 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { listProducts } from "../products/api";
 import {
   createTransfer,
   createVerification,
   dispatchTransfer,
-  listGodowns,
   postVerification,
   receiveTransfer,
+  type Godown,
   type Transfer,
   type Verification,
 } from "./api";
 
 export function TransfersPage() {
   const qc = useQueryClient();
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
+  const scope = useBranchScope();
+  // godowns of the selected branch only — posting into another
+  // branch's godown is refused by the server anyway
+  const godowns: { data: Godown[] } = { data: scope.godowns };
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
 
   const [t, setT] = useState({ from: "", to: "", product: "", qty: "" });
@@ -99,6 +104,12 @@ export function TransfersPage() {
       <Typography variant="h4" fontWeight={800}>
         Transfers &amp; Verification
       </Typography>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="transfers move between godowns"
+      />
 
       <Card>
         <CardContent>
