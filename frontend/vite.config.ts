@@ -13,6 +13,12 @@ export default defineConfig({
     // reachable as the "backend" service.
     proxy: {
       "/api": { target: "http://backend:8000", changeOrigin: true },
+      // FastAPI's own docs live outside /api, so without these the tunnel
+      // answered /docs with the SPA's index.html — a 200 that looked like it
+      // worked and showed the app instead of the API reference.
+      "/docs": { target: "http://backend:8000", changeOrigin: true },
+      "/redoc": { target: "http://backend:8000", changeOrigin: true },
+      "/openapi.json": { target: "http://backend:8000", changeOrigin: true },
     },
   },
 });

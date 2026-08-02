@@ -90,6 +90,8 @@ async def godowns_create(
         return await service.create_godown(session, principal, payload)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Branch not found")
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
@@ -105,6 +107,8 @@ async def godowns_update(
         return await service.update_godown(session, principal, godown_id, payload)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Godown not found")
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_409_CONFLICT, str(e))
 

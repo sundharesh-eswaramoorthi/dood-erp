@@ -20,6 +20,7 @@ import {
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { errorMessage } from "../../lib/api";
+import { useAuth } from "../../store/auth";
 import { getPrintSettings, savePrintSettings, type PrintSettings } from "../printing/api";
 import { useState } from "react";
 
@@ -52,6 +53,7 @@ const EMPTY_BRANCH = { name: "", code: "", address: "", phone: "", gstin: "", st
 const EMPTY_GODOWN = { name: "", branch_id: "", code: "" };
 
 export function SettingsPage() {
+  const { user: me } = useAuth();
   const qc = useQueryClient();
   const [tax, setTax] = useState({ name: "", rate: "" });
   const [tag, setTag] = useState({ name: "", color: "#B96D28" });
@@ -273,9 +275,13 @@ export function SettingsPage() {
                 onChange={(e) => setGodownForm({ ...godownForm, code: e.target.value })} sx={{ width: 120 }} />
               <TextField size="small" label="Branch" select required value={godownForm.branch_id}
                 onChange={(e) => setGodownForm({ ...godownForm, branch_id: e.target.value })} sx={{ minWidth: 170 }}>
-                {(branches.data ?? []).filter((b) => b.is_active).map((b) => (
-                  <MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>
-                ))}
+                {/* Branches are org-visible, but a godown can only be created in
+                    one you work in — offering the rest just earns a 403. */}
+                {(branches.data ?? [])
+                  .filter((b) => b.is_active && me?.branch_ids.includes(b.id))
+                  .map((b) => (
+                    <MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>
+                  ))}
               </TextField>
               <Button type="submit" variant="contained"
                 disabled={addGodown.isPending || !godownForm.name || !godownForm.branch_id}>

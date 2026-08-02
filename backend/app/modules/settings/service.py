@@ -134,8 +134,17 @@ async def list_godowns(
     return [dict(r) for r in rows]
 
 
+async def _require_branch_access(principal: Principal, branch_id: int) -> None:
+    """Branches are org-visible so you can see one you do not work in — but as
+    of V2.16 godowns carry branch RLS, so writing into such a branch is refused
+    by the policy and surfaces as a bare 500. Say so properly instead."""
+    if branch_id not in principal.branch_ids:
+        raise PermissionError(f"You do not have access to branch {branch_id}")
+
+
 async def create_godown(session: AsyncSession, principal: Principal, data) -> dict:
     await get_branch(session, principal, data.branch_id)  # 404s if not ours
+    await _require_branch_access(principal, data.branch_id)
     try:
         row = (
             await session.execute(
@@ -156,6 +165,7 @@ async def update_godown(session: AsyncSession, principal: Principal, godown_id: 
     fields = data.model_dump(exclude_unset=True)
     if fields.get("branch_id") is not None:
         await get_branch(session, principal, fields["branch_id"])
+        await _require_branch_access(principal, fields["branch_id"])
         await _assert_godown_empty(session, principal, godown_id, "move it to another branch")
     if fields.get("is_active") is False:
         await _assert_godown_empty(session, principal, godown_id, "deactivate it")
