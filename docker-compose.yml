@@ -69,8 +69,8 @@ services:
 
   frontend:
     build: ./frontend
-    environment:
-      VITE_API_URL: http://localhost:8000
+    # No VITE_API_URL: the SPA uses a relative /api base, proxied to the backend
+    # by Vite (see vite.config.ts) — so it works behind a single public URL.
     command: npm run dev -- --host 0.0.0.0 --port 5173
     volumes:
       - ./frontend:/app
