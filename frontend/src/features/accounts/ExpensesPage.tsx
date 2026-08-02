@@ -17,6 +17,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { errorMessage } from "../../lib/api";
 import {
   createExpenseCategory,
@@ -29,9 +31,10 @@ import {
 
 export function ExpensesPage() {
   const qc = useQueryClient();
+  const scope = useBranchScope();
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const categories = useQuery({ queryKey: ["expense-categories"], queryFn: listExpenseCategories });
-  const expenses = useQuery({ queryKey: ["expenses"], queryFn: listExpenses });
+  const expenses = useQuery({ queryKey: [...["expenses"], scope.branchId], queryFn: () => listExpenses(scope.branchId) });
 
   const [ex, setEx] = useState({ account: "", category: "", amount: "", note: "" });
   const [newCat, setNewCat] = useState("");
@@ -79,6 +82,12 @@ export function ExpensesPage() {
           account and reduces net profit.
         </Typography>
       </Box>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="expenses shown are this branch's"
+      />
       {msg && <Alert severity={msg.ok ? "success" : "error"} onClose={() => setMsg(null)}>{msg.text}</Alert>}
 
       <Card>

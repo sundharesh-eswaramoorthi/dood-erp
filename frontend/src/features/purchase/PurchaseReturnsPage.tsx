@@ -35,7 +35,7 @@ export function PurchaseReturnsPage() {
   // godowns of the selected branch only — posting into another
   // branch's godown is refused by the server anyway
   const godowns = { data: scope.godowns };
-  const returns = useQuery({ queryKey: ["purchase-returns"], queryFn: listReturns });
+  const returns = useQuery({ queryKey: [...["purchase-returns"], scope.branchId], queryFn: () => listReturns(scope.branchId) });
 
   const [r, setR] = useState(EMPTY);
   const [unitId, setUnitId] = useState<number | null>(null);

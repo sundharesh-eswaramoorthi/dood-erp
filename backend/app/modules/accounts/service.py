@@ -264,12 +264,18 @@ async def allocate_voucher(
     return {"voucher_id": voucher_id, "allocations": made, "unallocated": free}
 
 
-async def list_vouchers(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_vouchers(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE branch_id = :b " if branch_id else ""
+    params = {"l": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
-            text("SELECT id, doc_no, voucher_type, party_id, account_id, amount, voucher_date "
-                 "FROM payment_voucher ORDER BY id DESC LIMIT :l"),
-            {"l": limit},
+            text("SELECT id, doc_no, voucher_type, party_id, account_id, amount, voucher_date, "
+                 f"branch_id FROM payment_voucher {where}ORDER BY id DESC LIMIT :l"),
+            params,
         )
     ).mappings().all()
     return [dict(r) for r in rows]
@@ -324,12 +330,20 @@ async def post_expense(session: AsyncSession, principal: Principal, data: Expens
             "category_id": data.category_id, "account_balance": acct_bal}
 
 
-async def list_expenses(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_expenses(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE e.branch_id = :b " if branch_id else ""
+    params = {"l": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
-            text("SELECT e.id, e.doc_no, e.amount, e.account_id, e.category_id, e.expense_date, e.note, c.name AS category "
-                 "FROM expense e LEFT JOIN expense_category c ON c.id=e.category_id ORDER BY e.id DESC LIMIT :l"),
-            {"l": limit},
+            text("SELECT e.id, e.doc_no, e.amount, e.account_id, e.category_id, e.expense_date, "
+                 "e.note, e.branch_id, c.name AS category "
+                 "FROM expense e LEFT JOIN expense_category c ON c.id=e.category_id "
+                 f"{where}ORDER BY e.id DESC LIMIT :l"),
+            params,
         )
     ).mappings().all()
     return [dict(r) for r in rows]

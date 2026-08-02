@@ -45,10 +45,11 @@ async def create_order(
 
 @router.get("/orders")
 async def list_orders(
+    branch_id: int | None = None,
     principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_orders(session, principal)
+    return await service.list_orders(session, principal, branch_id=branch_id)
 
 
 @router.get("/orders/{order_id}", response_model=SaleOrderOut)
@@ -188,18 +189,20 @@ async def create_direct_bill(
 
 @router.get("/bills")
 async def list_bills(
+    branch_id: int | None = None,
     principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_bills(session, principal)
+    return await service.list_bills(session, principal, branch_id=branch_id)
 
 
 @router.get("/returns")
 async def list_returns(
+    branch_id: int | None = None,
     principal: Principal = Depends(require_permission("sales.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_returns(session, principal)
+    return await service.list_returns(session, principal, branch_id=branch_id)
 
 
 @router.post("/returns", response_model=SalesReturnOut, status_code=201)

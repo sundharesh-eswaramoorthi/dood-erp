@@ -32,7 +32,7 @@ type Note = { text: string; severity: "success" | "error" | "warning" };
 export function SaleOrdersPage() {
   const qc = useQueryClient();
   const h = useSalesHeader();
-  const orders = useQuery({ queryKey: ["sale-orders"], queryFn: listOrders });
+  const orders = useQuery({ queryKey: [...["sale-orders"], h.branchId], queryFn: () => listOrders(h.branchId) });
   const [note, setNote] = useState<Note | null>(null);
 
   const fail = (e: unknown, fallback: string) =>

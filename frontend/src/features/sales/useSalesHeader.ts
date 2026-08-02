@@ -43,6 +43,8 @@ export function useSalesHeader() {
   return {
     customer, setCustomer,
     branch, setBranch,
+    /** the same branch the document posts to, for scoping its list */
+    branchId: branch ? Number(branch) : undefined,
     parties: parties.data ?? [],
     branches,
     godowns,

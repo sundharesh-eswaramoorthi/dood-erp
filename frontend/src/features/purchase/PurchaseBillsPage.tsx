@@ -57,7 +57,7 @@ export function PurchaseBillsPage() {
   // godowns of the selected branch only — posting into another
   // branch's godown is refused by the server anyway
   const godowns = { data: scope.godowns };
-  const bills = useQuery({ queryKey: ["purchase-bills"], queryFn: listBills });
+  const bills = useQuery({ queryKey: [...["purchase-bills"], scope.branchId], queryFn: () => listBills(scope.branchId) });
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
 

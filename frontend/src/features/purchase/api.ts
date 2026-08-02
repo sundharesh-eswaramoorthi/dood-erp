@@ -56,8 +56,10 @@ export async function createBill(payload: PurchaseBillCreate): Promise<PurchaseB
   return data;
 }
 
-export async function listBills(): Promise<PurchaseBill[]> {
-  const { data } = await api.get<PurchaseBill[]>("/api/v1/purchase/bills");
+export async function listBills(branchId?: number): Promise<PurchaseBill[]> {
+  const { data } = await api.get<PurchaseBill[]>("/api/v1/purchase/bills", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }
 
@@ -164,7 +166,9 @@ export interface PurchaseReturnRow {
   return_date?: string;
 }
 
-export async function listReturns(): Promise<PurchaseReturnRow[]> {
-  const { data } = await api.get<PurchaseReturnRow[]>("/api/v1/purchase/returns");
+export async function listReturns(branchId?: number): Promise<PurchaseReturnRow[]> {
+  const { data } = await api.get<PurchaseReturnRow[]>("/api/v1/purchase/returns", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }

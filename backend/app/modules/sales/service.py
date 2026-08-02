@@ -201,11 +201,18 @@ async def cancel_order(session: AsyncSession, principal: Principal, order_id: in
     return await get_order(session, order_id)
 
 
-async def list_orders(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_orders(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE branch_id = :b " if branch_id else ""
+    params = {"l": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
-            text("SELECT id, doc_no, customer_id, order_date, status FROM sale_order ORDER BY id DESC LIMIT :l"),
-            {"l": limit},
+            text("SELECT id, doc_no, customer_id, order_date, status, branch_id FROM sale_order "
+                 f"{where}ORDER BY id DESC LIMIT :l"),
+            params,
         )
     ).mappings().all()
     return [dict(r) for r in rows]
@@ -673,12 +680,19 @@ async def post_direct_bill(
     return out
 
 
-async def list_bills(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_bills(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE branch_id = :b " if branch_id else ""
+    params = {"l": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
             text("SELECT id, doc_no, customer_id, sale_order_id, grand_total, paid_amount, "
-                 "balance_amount, bill_date, status FROM sales_bill ORDER BY id DESC LIMIT :l"),
-            {"l": limit},
+                 "balance_amount, bill_date, status, branch_id FROM sales_bill "
+                 f"{where}ORDER BY id DESC LIMIT :l"),
+            params,
         )
     ).mappings().all()
     # money as decimal strings, like the documents themselves
@@ -835,14 +849,21 @@ async def amend_bill(
     return {**new, "amended_from": bill_id, "revision_no": int(old["revision_no"]) + 1}
 
 
-async def list_returns(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_returns(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
     """Credit notes could be posted but never listed — the endpoint existed
     without a way to see what it had produced."""
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE branch_id = :b " if branch_id else ""
+    params = {"l": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
             text("SELECT id, doc_no, customer_id, orig_bill_id, grand_total, paid_amount, "
-                 "balance_amount, return_date, status FROM sales_return ORDER BY id DESC LIMIT :l"),
-            {"l": limit},
+                 "balance_amount, return_date, status, branch_id FROM sales_return "
+                 f"{where}ORDER BY id DESC LIMIT :l"),
+            params,
         )
     ).mappings().all()
     m = ("grand_total", "paid_amount", "balance_amount")

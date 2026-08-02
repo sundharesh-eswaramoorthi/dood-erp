@@ -28,7 +28,7 @@ type Note = { text: string; severity: "success" | "error" };
 export function SalesReturnsPage() {
   const qc = useQueryClient();
   const h = useSalesHeader();
-  const returns = useQuery({ queryKey: ["sales-returns"], queryFn: listReturns });
+  const returns = useQuery({ queryKey: [...["sales-returns"], h.branchId], queryFn: () => listReturns(h.branchId) });
   const [note, setNote] = useState<Note | null>(null);
 
   return (

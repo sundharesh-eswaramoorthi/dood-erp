@@ -17,6 +17,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { BranchFilter } from "../../components/BranchFilter";
+import { useBranchScope } from "../../components/useBranchScope";
 import { errorMessage } from "../../lib/api";
 import { usableSplits, type PaymentSplit } from "../money/api";
 import { PaymentSplits } from "../money/MoneyBlock";
@@ -35,9 +37,10 @@ import {
  *  component serves both rather than two that drift apart. */
 export function VoucherPage({ kind }: { kind: "receipt" | "payment" }) {
   const qc = useQueryClient();
+  const scope = useBranchScope();
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const vouchers = useQuery({ queryKey: ["vouchers"], queryFn: listVouchers });
+  const vouchers = useQuery({ queryKey: [...["vouchers"], scope.branchId], queryFn: () => listVouchers(scope.branchId) });
   const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
 
   const [party, setParty] = useState("");
@@ -116,6 +119,12 @@ export function VoucherPage({ kind }: { kind: "receipt" | "payment" }) {
             : "We pay a supplier: the party's payable falls and the money leaves an account."}
         </Typography>
       </Box>
+      <BranchFilter
+        value={scope.branch}
+        onChange={scope.setBranch}
+        branches={scope.branches}
+        helperText="vouchers shown are this branch's"
+      />
       {msg && (
         <Alert severity={msg.ok ? "success" : "error"} onClose={() => setMsg(null)}>{msg.text}</Alert>
       )}

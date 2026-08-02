@@ -40,19 +40,21 @@ async def create_bill(
 
 @router.get("/bills")
 async def list_bills(
+    branch_id: int | None = None,
     principal: Principal = Depends(require_permission("purchase.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_bills(session, principal)
+    return await service.list_bills(session, principal, branch_id=branch_id)
 
 
 # ---- returns ----
 @router.get("/returns")
 async def list_returns(
+    branch_id: int | None = None,
     principal: Principal = Depends(require_permission("purchase.read")),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_returns(session, principal)
+    return await service.list_returns(session, principal, branch_id=branch_id)
 
 
 @router.post("/returns", response_model=PurchaseReturnOut, status_code=status.HTTP_201_CREATED)

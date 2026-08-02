@@ -64,8 +64,10 @@ export async function postVoucher(payload: {
   return data as VoucherResult;
 }
 
-export async function listVouchers(): Promise<Voucher[]> {
-  const { data } = await api.get<Voucher[]>("/api/v1/accounts/payment-vouchers");
+export async function listVouchers(branchId?: number): Promise<Voucher[]> {
+  const { data } = await api.get<Voucher[]>("/api/v1/accounts/payment-vouchers", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }
 
@@ -99,8 +101,10 @@ export async function postExpense(payload: {
   return data as never;
 }
 
-export async function listExpenses(): Promise<Expense[]> {
-  const { data } = await api.get<Expense[]>("/api/v1/accounts/expenses");
+export async function listExpenses(branchId?: number): Promise<Expense[]> {
+  const { data } = await api.get<Expense[]>("/api/v1/accounts/expenses", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }
 

@@ -63,10 +63,11 @@ async def post_voucher(
 
 @router.get("/payment-vouchers")
 async def list_vouchers(
+    branch_id: int | None = None,
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_vouchers(session, principal)
+    return await service.list_vouchers(session, principal, branch_id=branch_id)
 
 
 # ---- expenses ----
@@ -106,10 +107,11 @@ async def post_expense(
 
 @router.get("/expenses")
 async def list_expenses(
+    branch_id: int | None = None,
     principal: Principal = Depends(get_principal),
     session: AsyncSession = Depends(get_scoped_session),
 ):
-    return await service.list_expenses(session, principal)
+    return await service.list_expenses(session, principal, branch_id=branch_id)
 
 
 # ---- payment types (v2 §3 "add payment type") ----

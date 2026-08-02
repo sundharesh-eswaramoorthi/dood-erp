@@ -31,8 +31,8 @@ type Note = { text: string; severity: "success" | "error" | "warning" };
 export function SalesInvoicesPage() {
   const qc = useQueryClient();
   const h = useSalesHeader();
-  const bills = useQuery({ queryKey: ["sales-bills"], queryFn: listBills });
-  const orders = useQuery({ queryKey: ["sale-orders"], queryFn: listOrders });
+  const bills = useQuery({ queryKey: [...["sales-bills"], h.branchId], queryFn: () => listBills(h.branchId) });
+  const orders = useQuery({ queryKey: [...["sale-orders"], h.branchId], queryFn: () => listOrders(h.branchId) });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
 
   const [note, setNote] = useState<Note | null>(null);

@@ -547,14 +547,21 @@ async def cancel_po(session: AsyncSession, principal: Principal, po_id: int) -> 
     return await get_po(session, po_id)
 
 
-async def list_bills(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_bills(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE branch_id = :b " if branch_id else ""
+    params = {"lim": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
             text(
                 "SELECT id, doc_no, supplier_id, bill_date, grand_total, paid_amount, "
-                "balance_amount, po_id, status FROM purchase_bill ORDER BY id DESC LIMIT :lim"
+                "balance_amount, po_id, status, branch_id FROM purchase_bill "
+                f"{where}ORDER BY id DESC LIMIT :lim"
             ),
-            {"lim": limit},
+            params,
         )
     ).mappings().all()
     m = ("grand_total", "paid_amount", "balance_amount")
@@ -605,13 +612,20 @@ async def amend_bill(
     return {**new, "amended_from": bill_id, "revision_no": int(old["revision_no"]) + 1}
 
 
-async def list_returns(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:
+async def list_returns(
+    session: AsyncSession, principal: Principal, limit: int = 100, branch_id: int | None = None
+) -> list[dict]:
     """Debit notes could be posted but never listed."""
+    # RLS already limits these to branches the caller works in; branch_id
+    # narrows further to ONE of them, which is what the screen filter needs.
+    where = "WHERE branch_id = :b " if branch_id else ""
+    params = {"l": limit} | ({"b": branch_id} if branch_id else {})
     rows = (
         await session.execute(
             text("SELECT id, doc_no, supplier_id, orig_bill_id, grand_total, paid_amount, "
-                 "balance_amount, return_date, status FROM purchase_return ORDER BY id DESC LIMIT :l"),
-            {"l": limit},
+                 "balance_amount, return_date, status, branch_id FROM purchase_return "
+                 f"{where}ORDER BY id DESC LIMIT :l"),
+            params,
         )
     ).mappings().all()
     m = ("grand_total", "paid_amount", "balance_amount")

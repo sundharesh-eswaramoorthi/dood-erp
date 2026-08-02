@@ -33,8 +33,10 @@ export async function createOrder(payload: {
   return data;
 }
 
-export async function listOrders(): Promise<SaleOrder[]> {
-  const { data } = await api.get<SaleOrder[]>("/api/v1/sales/orders");
+export async function listOrders(branchId?: number): Promise<SaleOrder[]> {
+  const { data } = await api.get<SaleOrder[]>("/api/v1/sales/orders", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }
 
@@ -105,8 +107,10 @@ export async function billOrder(
   return data as BilledOut;
 }
 
-export async function listBills(): Promise<SalesBill[]> {
-  const { data } = await api.get<SalesBill[]>("/api/v1/sales/bills");
+export async function listBills(branchId?: number): Promise<SalesBill[]> {
+  const { data } = await api.get<SalesBill[]>("/api/v1/sales/bills", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }
 
@@ -154,7 +158,9 @@ export async function createReturn(
   return data as SalesReturn & BilledOut;
 }
 
-export async function listReturns(): Promise<SalesReturn[]> {
-  const { data } = await api.get<SalesReturn[]>("/api/v1/sales/returns");
+export async function listReturns(branchId?: number): Promise<SalesReturn[]> {
+  const { data } = await api.get<SalesReturn[]>("/api/v1/sales/returns", {
+    params: branchId ? { branch_id: branchId } : undefined,
+  });
   return data;
 }
