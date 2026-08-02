@@ -93,6 +93,8 @@ async def update(
         return await service.update_party(session, principal, party_id, payload)
     except LookupError:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Party not found")
+    except PermissionError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 

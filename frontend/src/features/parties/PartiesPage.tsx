@@ -24,10 +24,11 @@ import {
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
 import { errorMessage } from "../../lib/api";
+import { useAuth } from "../../store/auth";
 import { listBranches } from "../users/api";
 import {
   createParty,
@@ -43,6 +44,7 @@ import {
 const EMPTY = {
   name: "",
   area: "",
+  serving_branch_id: "",
   phone: "",
   gstin: "",
   credit_limit: "",
@@ -89,7 +91,22 @@ export function PartiesPage() {
     queryFn: () => listParties(filters),
   });
   const areas = useQuery({ queryKey: ["party-areas"], queryFn: listAreas });
-  const branches = useQuery({ queryKey: ["branches"], queryFn: listBranches });
+  const { user: me } = useAuth();
+  const allBranches = useQuery({ queryKey: ["branches"], queryFn: listBranches });
+  // A party is filed against a branch, and you can only file it against one you
+  // work in — offering the rest would just earn a 403 from the server.
+  const branches = useMemo(
+    () => (allBranches.data ?? []).filter((b) => me?.branch_ids.includes(b.id)),
+    [allBranches.data, me],
+  );
+  const branchName = (id: number) =>
+    (allBranches.data ?? []).find((b) => b.id === id)?.name ?? `#${id}`;
+
+  useEffect(() => {
+    if (branches.length && !form.serving_branch_id) {
+      setForm((f) => ({ ...f, serving_branch_id: String(branches[0].id) }));
+    }
+  }, [branches, form.serving_branch_id]);
   const activity = useQuery({ queryKey: ["activity"], queryFn: getActivity, refetchInterval: 3000 });
 
   const invalidate = () => {
@@ -102,6 +119,7 @@ export function PartiesPage() {
       createParty({
         name: form.name,
         area: form.area,
+        serving_branch_id: Number(form.serving_branch_id),
         phone: form.phone || null,
         gstin: form.gstin || null,
         credit_limit: form.credit_limit || null,
@@ -184,6 +202,19 @@ export function PartiesPage() {
                   onChange={(e) => setForm({ ...form, area: e.target.value })}
                   sx={{ flex: 1 }}
                 />
+                <TextField
+                  label="Branch"
+                  select
+                  required
+                  value={form.serving_branch_id}
+                  onChange={(e) => setForm({ ...form, serving_branch_id: e.target.value })}
+                  helperText="who serves this party"
+                  sx={{ flex: 1, minWidth: 160 }}
+                >
+                  {branches.map((b) => (
+                    <MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>
+                  ))}
+                </TextField>
                 <TextField
                   label="Phone"
                   value={form.phone}
@@ -293,7 +324,7 @@ export function PartiesPage() {
                   type="submit"
                   variant="contained"
                   size="large"
-                  disabled={create.isPending || !form.name || !form.area}
+                  disabled={create.isPending || !form.name || !form.area || !form.serving_branch_id}
                   sx={{ height: 56 }}
                 >
                   Add
@@ -345,6 +376,19 @@ export function PartiesPage() {
             </TextField>
             <TextField
               size="small"
+              label="Branch"
+              select
+              value={filters.serving_branch_id ?? ""}
+              onChange={(e) => patch("serving_branch_id", e.target.value ? Number(e.target.value) : "")}
+              sx={{ minWidth: 150 }}
+            >
+              <MenuItem value="">All branches</MenuItem>
+              {(allBranches.data ?? []).map((b) => (
+                <MenuItem key={b.id} value={b.id}>{b.name}</MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              size="small"
               label="Status"
               select
               value={filters.is_active === undefined ? "" : String(filters.is_active)}
@@ -388,6 +432,7 @@ export function PartiesPage() {
                   <TableCell>Code</TableCell>
                   <TableCell>Name</TableCell>
                   <TableCell>Area</TableCell>
+                  <TableCell>Branch</TableCell>
                   <TableCell>Phone</TableCell>
                   <TableCell align="right">Outstanding</TableCell>
                   <TableCell>Status</TableCell>
@@ -408,6 +453,7 @@ export function PartiesPage() {
                         </MuiLink>
                       </TableCell>
                       <TableCell>{p.area || "—"}</TableCell>
+                      <TableCell>{branchName(p.serving_branch_id)}</TableCell>
                       <TableCell>{p.phone || "—"}</TableCell>
                       <TableCell align="right">
                         <Typography
@@ -474,7 +520,7 @@ export function PartiesPage() {
 
       <EditDialog
         party={editing}
-        branches={branches.data ?? []}
+        branches={branches}
         saving={save.isPending}
         error={save.isError}
         onClose={() => setEditing(null)}

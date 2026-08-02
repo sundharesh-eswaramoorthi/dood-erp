@@ -57,7 +57,8 @@ export interface PartyCreate {
   opening_balance_side?: string;
   opening_as_of?: string | null;
   is_active?: boolean;
-  serving_branch_id?: number | null;
+  /** required: which branch serves this party */
+  serving_branch_id: number;
   address?: AddressInput | null;
   contacts?: ContactInput[];
 }

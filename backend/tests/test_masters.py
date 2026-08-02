@@ -9,11 +9,17 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import text
 
 from app.core.deps import Principal
 from app.modules.parties import service as parties
-from app.modules.parties.schemas import AddressCreate, ContactCreate, PartyCreate
+from app.modules.parties.schemas import (
+    AddressCreate,
+    ContactCreate,
+    PartyCreate,
+    PartyUpdate,
+)
 from app.modules.products import service as products
 from app.modules.products.schemas import ProductCreate
 from app.modules.settings import service as settings
@@ -95,7 +101,7 @@ async def test_party_posts_with_its_address_and_contacts(ctx):
     party = await parties.create_party(
         ctx["s"], p,
         PartyCreate(
-            name="Nested Traders", area="Erode",
+            name="Nested Traders", area="Erode", serving_branch_id=ctx["branch"],
             address=AddressCreate(line1="12 Mill Road", city="Erode",
                                   map_link="https://www.google.com/maps/@11.3410,77.7172,15z"),
             contacts=[ContactCreate(name="Murugan", relationship="Owner"),
@@ -126,7 +132,7 @@ async def test_map_link_geo_extraction(ctx, link, lat):
     p = _principal(ctx)
     party = await parties.create_party(
         ctx["s"], p,
-        PartyCreate(name=f"Geo {link[-6:]}", area="Erode",
+        PartyCreate(name=f"Geo {link[-6:]}", area="Erode", serving_branch_id=ctx["branch"],
                     address=AddressCreate(line1="1 Road", map_link=link)),
         None,
     )
@@ -146,7 +152,8 @@ async def test_numbering_prefix_is_editable_but_the_counter_only_moves_forward(c
     assert out["sample"] == "PTY/00001"
 
     party = await parties.create_party(
-        ctx["s"], p, PartyCreate(name="After rename", area="Erode"), None,
+        ctx["s"], p,
+        PartyCreate(name="After rename", area="Erode", serving_branch_id=ctx["branch"]), None,
     )
     assert party.party_code == "PTY/00001"
 
@@ -160,3 +167,54 @@ async def test_numbering_prefix_is_editable_but_the_counter_only_moves_forward(c
         ctx["s"], p, series["id"], NumberingSeriesUpdate(next_value=500),
     )
     assert out["sample"] == "PTY/00500"
+
+
+async def test_a_party_must_name_a_branch_the_user_works_in(ctx):
+    """The branch was optional and fell back to the caller's first one, so a
+    party could be filed against a branch nobody chose. It is now required, and
+    checked against the caller's access rather than merely the organisation."""
+    p = _principal(ctx)
+    with pytest.raises(ValidationError):
+        PartyCreate(name="No branch", area="Erode")
+
+    other = (
+        await ctx["s"].execute(
+            text("INSERT INTO branch (org_id, name) VALUES (:o,'Elsewhere') RETURNING id"),
+            {"o": ctx["org"]},
+        )
+    ).scalar_one()
+    # exists in the org, but this user does not work there
+    with pytest.raises(PermissionError, match="do not have access"):
+        await parties.create_party(
+            ctx["s"], p,
+            PartyCreate(name="Wrong branch", area="Erode", serving_branch_id=other), None,
+        )
+    with pytest.raises(ValueError, match="not found in this organisation"):
+        await parties.create_party(
+            ctx["s"], p,
+            PartyCreate(name="Bogus branch", area="Erode", serving_branch_id=999_999), None,
+        )
+
+    ok = await parties.create_party(
+        ctx["s"], p,
+        PartyCreate(name="Right branch", area="Erode", serving_branch_id=ctx["branch"]), None,
+    )
+    assert ok.serving_branch_id == ctx["branch"]
+
+
+async def test_a_party_cannot_be_moved_to_an_unreachable_branch(ctx):
+    p = _principal(ctx)
+    other = (
+        await ctx["s"].execute(
+            text("INSERT INTO branch (org_id, name) VALUES (:o,'Elsewhere') RETURNING id"),
+            {"o": ctx["org"]},
+        )
+    ).scalar_one()
+    party = await parties.create_party(
+        ctx["s"], p,
+        PartyCreate(name="Movable", area="Erode", serving_branch_id=ctx["branch"]), None,
+    )
+    with pytest.raises(PermissionError, match="do not have access"):
+        await parties.update_party(
+            ctx["s"], p, party.id, PartyUpdate(serving_branch_id=other),
+        )

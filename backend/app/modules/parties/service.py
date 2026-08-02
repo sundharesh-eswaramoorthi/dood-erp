@@ -91,26 +91,33 @@ async def _post_opening(
     )
 
 
-async def _require_branch_in_org(session: AsyncSession, org_id: int, branch_id: int) -> None:
+async def _require_branch(session: AsyncSession, principal: Principal, branch_id: int) -> None:
+    """The branch must exist in the org AND be one this user may work in.
+
+    Checking only the org let anyone file a party against any branch in the
+    business, including ones they cannot otherwise see — the branch picker
+    offers their own branches, so the server holds them to the same list.
+    """
     ok = (
         await session.execute(
             text("SELECT 1 FROM branch WHERE id=:b AND org_id=:o AND is_active"),
-            {"b": branch_id, "o": org_id},
+            {"b": branch_id, "o": principal.org_id},
         )
     ).scalar_one_or_none()
     if ok is None:
         raise ValueError(f"Branch {branch_id} not found in this organisation")
+    if branch_id not in principal.branch_ids:
+        raise PermissionError(f"You do not have access to branch {branch_id}")
 
 
 async def create_party(
     session: AsyncSession, principal: Principal, data: PartyCreate, idem_key: str | None
 ) -> Party:
-    # v2: parties are org-wide, so the branch is the *serving* branch, not a
-    # visibility boundary — it only has to exist in the org.
-    branch_id = data.serving_branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
-    if branch_id is None:
-        raise ValueError("Caller has no branch access")
-    await _require_branch_in_org(session, principal.org_id, branch_id)
+    # v2 §9: parties stay visible org-wide, so this is the *serving* branch —
+    # who looks after them, not who may see them. It must still be a branch
+    # this user works in.
+    branch_id = data.serving_branch_id
+    await _require_branch(session, principal, branch_id)
 
     if idem_key:
         existing = (
@@ -183,8 +190,10 @@ async def update_party(
     party = await _require_party(session, party_id)
     fields = data.model_dump(exclude_unset=True)
 
+    # moving a party to a branch you cannot work in is the same hole as
+    # creating one there
     if "serving_branch_id" in fields and fields["serving_branch_id"] is not None:
-        await _require_branch_in_org(session, principal.org_id, fields["serving_branch_id"])
+        await _require_branch(session, principal, fields["serving_branch_id"])
 
     # Opening balance is ledger-backed: correct it by reversing the old posting
     # and writing a fresh one, never by editing history.

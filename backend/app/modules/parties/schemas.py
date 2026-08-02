@@ -17,7 +17,11 @@ class PartyCreate(BaseModel):
     opening_balance_side: str = Field(default="receivable", pattern="^(receivable|payable)$")
     opening_as_of: dt.date | None = None
     is_active: bool = True
-    serving_branch_id: int | None = None
+    # Required: which branch serves this party. It was optional and silently
+    # defaulted to the caller's first branch, so a party could be filed against
+    # a branch nobody chose — and with several branches that is a guess, not a
+    # default. Parties stay visible org-wide (v2 §9); this says who serves them.
+    serving_branch_id: int
 
     # v2 §1 wants the address and the first contact on the "Add party" form.
     # They post with the party so a half-entered party can't survive a failure

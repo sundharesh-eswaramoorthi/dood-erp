@@ -45,6 +45,16 @@ async def create_branch(session: AsyncSession, principal: Principal, data) -> di
         ).mappings().one()
     except IntegrityError as e:
         raise ValueError(f"A branch named '{data.name}' (or that code) already exists") from e
+
+    # Whoever opens a branch works in it. Branch access now gates real work —
+    # a party names the branch that serves it, and only branches you work in
+    # are on offer — so without this you could create a branch and then be
+    # unable to use it, which reads as the new branch being broken.
+    await session.execute(
+        text("INSERT INTO user_branch_access (user_id, branch_id) VALUES (:u,:b) "
+             "ON CONFLICT DO NOTHING"),
+        {"u": principal.user_id, "b": row["id"]},
+    )
     return dict(row)
 
 
