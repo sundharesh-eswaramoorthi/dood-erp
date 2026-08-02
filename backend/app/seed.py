@@ -193,8 +193,13 @@ async def seed() -> None:
                     ),
                     {"o": org_id, "fy": fy},
                 )
-            # org-wide numbering series for stock documents
-            for doc_type, prefix in [("stock_adjustment", "ADJ-"), ("stock_transfer", "TRF-"),
+            # org-wide numbering series for stock documents.
+            # 'product' belongs here as much as 'party' does: since V2.12 a blank
+            # product code is allocated from it, and migration 0025 only back-fills
+            # series for orgs that already existed — on a clean install there are
+            # none yet, so without this every product needs a hand-typed code.
+            for doc_type, prefix in [("product", "PRD-"),
+                                     ("stock_adjustment", "ADJ-"), ("stock_transfer", "TRF-"),
                                      ("stock_verification", "VER-"), ("journal", "JV-"),
                                      ("purchase_bill", "PB-"), ("purchase_return", "PR-"),
                                      ("purchase_order", "PO-"), ("sale_order", "SO-"),
@@ -256,6 +261,21 @@ async def seed() -> None:
                     ),
                     {"o": org_id, "n": aname, "t": atype},
                 )
+            # Payment types (v2 §3). Migration 0022 seeds these by CROSS JOIN on
+            # organization, which finds nothing on a fresh database — migrations
+            # run before this file creates the org. Without them the split-payment
+            # editor has no modes to offer and Payment Mode-wise Sales has nothing
+            # to group by, so the seed has to cover the clean-install path too.
+            for pname, pkind, pord in (
+                ("Cash", "cash", 1), ("UPI", "upi", 2), ("Card", "card", 3),
+                ("Cheque", "cheque", 4), ("Bank Transfer", "bank", 5), ("Credit", "credit", 6),
+            ):
+                await s.execute(
+                    text("INSERT INTO payment_type (org_id, name, kind, sort_order) "
+                         "VALUES (:o, :n, :k, :s) ON CONFLICT DO NOTHING"),
+                    {"o": org_id, "n": pname, "k": pkind, "s": pord},
+                )
+
             # expense categories
             for cname in ("Rent", "Salary", "Transport", "Utilities", "Misc"):
                 await s.execute(
