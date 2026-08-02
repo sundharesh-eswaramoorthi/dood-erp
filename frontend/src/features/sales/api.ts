@@ -6,12 +6,27 @@ export interface SaleOrder {
   status: string;
   customer_id: number;
   order_date?: string;
+  grand_total?: string;
+  /** set when the customer is over their credit limit — the order still posted */
+  credit_warning?: string | null;
+}
+
+/** A document line, as every sales endpoint takes it. */
+export interface SaleLineIn {
+  product_id: number;
+  godown_id: number;
+  entered_qty: string;
+  entered_unit_id: number;
+  rate: string;
+  gst_rate?: string;
+  discount_pct?: string;
 }
 
 export async function createOrder(payload: {
   customer_id: number;
-  lines: { product_id: number; godown_id: number; entered_qty: string; entered_unit_id: number; rate: string }[];
-}): Promise<SaleOrder> {
+  branch_id?: number;
+  lines: SaleLineIn[];
+} & Record<string, unknown>): Promise<SaleOrder> {
   const { data } = await api.post<SaleOrder>("/api/v1/sales/orders", payload, {
     headers: { "Idempotency-Key": crypto.randomUUID() },
   });
@@ -63,7 +78,9 @@ export interface SalesBill {
 }
 
 export interface BilledOut {
+  id: number;
   doc_no: string | null;
+  credit_warning?: string | null;
   grand_total: string;
   cogs_total: string;
   taxable_total: string;
@@ -95,18 +112,13 @@ export async function listBills(): Promise<SalesBill[]> {
 
 
 /** v2 §4 counter sale: an invoice with no order behind it. */
-export interface DirectBillLine {
-  product_id: number;
-  godown_id: number;
-  entered_qty: string;
-  entered_unit_id: number;
-  rate: string;
-  gst_rate?: string;
-  discount_pct?: string;
-}
-
 export async function createDirectBill(
-  payload: { customer_id: number; supply_type?: string; lines: DirectBillLine[] } & Record<string, unknown>,
+  payload: {
+    customer_id: number;
+    branch_id?: number;
+    supply_type?: string;
+    lines: SaleLineIn[];
+  } & Record<string, unknown>,
 ): Promise<BilledOut & { doc_no: string | null }> {
   const { data } = await api.post("/api/v1/sales/bills", payload, {
     headers: { "Idempotency-Key": crypto.randomUUID() },

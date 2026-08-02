@@ -79,16 +79,18 @@ async def _post_receivable(
     cogs_total: Decimal,
     bill_date,
     payment_account_id: int | None,
-) -> None:
+) -> str | None:
     """The money tail every sales bill shares, whether it came from an order or
     straight off the counter. Keeping it in one place is what stops the two
-    paths drifting the way purchase and sales did before v2."""
+    paths drifting the way purchase and sales did before v2.
+
+    Returns the credit-limit warning to surface, if the customer breached it."""
     await doc_money.write_totals(session, "sales_bill", bill_id, totals)
     await session.execute(
         text("UPDATE sales_bill SET cogs_total=:c WHERE id=:i"), {"c": cogs_total, "i": bill_id}
     )
     # only the unpaid part is real credit exposure
-    await credit.check(session, principal.org_id, customer_id, totals.balance_amount)
+    warning = await credit.check(session, principal.org_id, customer_id, totals.balance_amount)
     await post_party_entry(
         session, org_id=principal.org_id, branch_id=branch, party_id=customer_id,
         entry_side="debit", amount=totals.grand_total, source=("sales_bill", bill_id, 0),
@@ -100,6 +102,7 @@ async def _post_receivable(
         amount=totals.paid_amount, effective_date=bill_date, created_by=principal.user_id,
         party_side="credit", account_direction="in",
     )
+    return warning
 
 
 async def create_order(session: AsyncSession, principal: Principal, data: SaleOrderCreate) -> dict:
@@ -173,14 +176,15 @@ async def create_order(session: AsyncSession, principal: Principal, data: SaleOr
          "gt": t.grand_total, "i": order_id},
     )
 
-    # v2 §1 credit limit — advisory gate at order time on the real order value;
-    # the bill re-checks. Raising here rolls the whole txn back, so the
-    # reservations above are undone with it.
-    await credit.check(session, principal.org_id, data.customer_id, t.grand_total)
+    # v2 §1 credit limit — advisory: the order stands and the warning travels
+    # back with it. A counter cannot stop mid-sale to raise somebody's limit.
+    warning = await credit.check(session, principal.org_id, data.customer_id, t.grand_total)
 
     await emit(session, principal.org_id, "sale.order",
                {"order_id": order_id, "customer_id": data.customer_id, "grand_total": str(t.grand_total)})
-    return await get_order(session, order_id)
+    out = await get_order(session, order_id)
+    out["credit_warning"] = warning
+    return out
 
 
 async def cancel_order(session: AsyncSession, principal: Principal, order_id: int) -> dict:
@@ -548,7 +552,7 @@ async def bill_order(
                     "gst_rate": m.gst_rate, "cgst": m.cgst, "sgst": m.sgst, "igst": m.igst,
                     "cogs_amount": cogs, "line_total": m.line_total})
 
-    await _post_receivable(
+    warning = await _post_receivable(
         session, principal, bill_id=bill_id, branch=branch, customer_id=order["customer_id"],
         totals=t, cogs_total=cogs_total, bill_date=bill_date,
         payment_account_id=opts.payment_account_id,
@@ -566,7 +570,9 @@ async def bill_order(
         await session.execute(text("UPDATE sale_order SET status='delivered' WHERE id=:i"), {"i": order_id})
     await emit(session, principal.org_id, "sale.bill",
                {"bill_id": bill_id, "order_id": order_id, "grand_total": str(t.grand_total)})
-    return await get_bill(session, bill_id)
+    out = await get_bill(session, bill_id)
+    out["credit_warning"] = warning
+    return out
 
 
 async def post_direct_bill(
@@ -654,7 +660,7 @@ async def post_direct_bill(
                     "taxable": m.taxable, "gst_rate": m.gst_rate, "cgst": m.cgst, "sgst": m.sgst,
                     "igst": m.igst, "cogs_amount": cogs, "line_total": m.line_total})
 
-    await _post_receivable(
+    warning = await _post_receivable(
         session, principal, bill_id=bill_id, branch=branch, customer_id=data.customer_id,
         totals=t, cogs_total=cogs_total, bill_date=bill_date,
         payment_account_id=data.payment_account_id,
@@ -662,7 +668,9 @@ async def post_direct_bill(
     await emit(session, principal.org_id, "sale.bill",
                {"bill_id": bill_id, "order_id": None, "counter_sale": True,
                 "grand_total": str(t.grand_total)})
-    return await get_bill(session, bill_id)
+    out = await get_bill(session, bill_id)
+    out["credit_warning"] = warning
+    return out
 
 
 async def list_bills(session: AsyncSession, principal: Principal, limit: int = 100) -> list[dict]:

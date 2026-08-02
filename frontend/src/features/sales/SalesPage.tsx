@@ -21,15 +21,17 @@ import {
   Typography,
 } from "@mui/material";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../../lib/api";
+import { useAuth } from "../../store/auth";
 import { billPayments, listAccounts } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
 import { listProducts } from "../products/api";
-import { getCurrentStock, listGodowns } from "../stock/api";
+import { listGodowns } from "../stock/api";
+import { listBranches } from "../users/api";
 import {
   billOrder,
   cancelOrder,
@@ -42,146 +44,102 @@ import {
   type SaleOrder,
   type SalesBill,
 } from "./api";
+import {
+  SaleLinesEditor,
+  emptyLine,
+  isComplete,
+  toPayload,
+  toPreviewLines,
+  type SaleLine,
+} from "./SaleLines";
 
-const EMPTY = { customer: "", godown: "", product: "", qty: "", rate: "" };
 const STATUS_COLOR: Record<string, "warning" | "success" | "default"> = {
   pending: "warning",
   delivered: "success",
   cancelled: "default",
 };
 
+type Note = { text: string; severity: "success" | "error" | "warning" };
+
 export function SalesPage() {
   const qc = useQueryClient();
+  const { user: me } = useAuth();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
+  const allGodowns = useQuery({ queryKey: ["godowns", "all"], queryFn: () => listGodowns(true) });
+  const allBranches = useQuery({ queryKey: ["branches"], queryFn: listBranches });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const orders = useQuery({ queryKey: ["sale-orders"], queryFn: listOrders });
   const bills = useQuery({ queryKey: ["sales-bills"], queryFn: listBills });
-
-  const [f, setF] = useState(EMPTY);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [billing, setBilling] = useState<number | null>(null);
-  const [historyFor, setHistoryFor] = useState<number | null>(null);
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
 
-  useEffect(() => {
-    if (parties.data?.length && !f.customer) setF((s) => ({ ...s, customer: String(parties.data![0].id) }));
-    if (godowns.data?.length && !f.godown) setF((s) => ({ ...s, godown: String(godowns.data![0].id) }));
-    if (products.data?.length && !f.product) setF((s) => ({ ...s, product: String(products.data![0].id) }));
-  }, [parties.data, godowns.data, products.data, f.customer, f.godown, f.product]);
+  const [note, setNote] = useState<Note | null>(null);
+  const [billing, setBilling] = useState<number | null>(null);
+  const [historyFor, setHistoryFor] = useState<number | null>(null);
 
-  const baseUnitOf = (pid: number) => products.data?.find((p) => p.id === pid)?.base_unit_id ?? 0;
+  // only branches this user may post into — the server refuses the rest
+  const branches = useMemo(
+    () => (allBranches.data ?? []).filter((b) => me?.branch_ids.includes(b.id)),
+    [allBranches.data, me],
+  );
   const partyName = (id: number) => parties.data?.find((p) => p.id === id)?.name ?? id;
 
-  // live availability of the selected product
-  const avail = useQuery({
-    queryKey: ["stock-current", Number(f.product)],
-    queryFn: () => getCurrentStock(Number(f.product)),
-    enabled: !!f.product,
-  });
+  const ok = (text: string) => setNote({ text, severity: "success" });
+  const fail = (e: unknown, fallback: string) =>
+    setNote({ text: errorMessage(e, fallback), severity: "error" });
 
-  const create = useMutation({
-    mutationFn: () =>
-      createOrder({
-        customer_id: Number(f.customer),
-        lines: [
-          { product_id: Number(f.product), godown_id: Number(f.godown), entered_qty: f.qty, entered_unit_id: baseUnitOf(Number(f.product)), rate: f.rate || "0" },
-        ],
-      }),
-    onSuccess: (o) => {
-      setMsg(`Order ${o.doc_no} placed — stock reserved.`);
-      setF({ ...f, qty: "", rate: "" });
-      qc.invalidateQueries({ queryKey: ["sale-orders"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
-    },
-    onError: (e: unknown) => {
-      setMsg(errorMessage(e, "Order failed"));
-    },
-  });
+  // ---- header state, shared by both documents ----
+  const [customer, setCustomer] = useState("");
+  const [branch, setBranch] = useState("");
+  useEffect(() => {
+    if (parties.data?.length && !customer) setCustomer(String(parties.data[0].id));
+    if (branches.length && !branch) setBranch(String(branches[0].id));
+  }, [parties.data, branches, customer, branch]);
+
+  // a document ships out of its own branch's godowns and no others
+  const godowns = useMemo(
+    () => (allGodowns.data ?? []).filter((g) => String(g.branch_id) === branch),
+    [allGodowns.data, branch],
+  );
 
   const cancel = useMutation({
     mutationFn: (id: number) => cancelOrder(id),
     onSuccess: () => {
-      setMsg("Order cancelled — reservation released.");
+      ok("Order cancelled — reservation released.");
       qc.invalidateQueries({ queryKey: ["sale-orders"] });
       qc.invalidateQueries({ queryKey: ["stock-current"] });
     },
+    onError: (e) => fail(e, "Could not cancel the order"),
   });
 
   const deliver = useMutation({
     mutationFn: (id: number) => deliverOrder(id),
     onSuccess: (d) => {
-      setMsg(`Dispatched ${d.doc_no} — stock moved once, reservation released, order delivered.`);
+      ok(`Dispatched ${d.doc_no} — stock moved once, reservation released, order delivered.`);
       qc.invalidateQueries({ queryKey: ["sale-orders"] });
       qc.invalidateQueries({ queryKey: ["stock-current"] });
     },
-    onError: (e: unknown) => {
-      setMsg(errorMessage(e, "Delivery failed"));
-    },
-  });
-
-  // v2 §4 counter sale: no order, the bill moves the stock itself
-  const [counter, setCounter] = useState({ customer: "", godown: "", product: "", qty: "", rate: "", gst: "" });
-  const [counterMoney, setCounterMoney] = useState<MoneyHeader>({ ...EMPTY_MONEY });
-  const counterPreview = useQuery({
-    queryKey: ["money-preview", counter, counterMoney],
-    queryFn: () =>
-      previewMoney(
-        [{ qty: counter.qty, rate: counter.rate, gst_rate: counter.gst }],
-        counterMoney,
-        "intra",
-      ),
-    enabled: !!(counter.product && counter.qty && counter.rate),
-  });
-  const directBill = useMutation({
-    mutationFn: () =>
-      createDirectBill({
-        customer_id: Number(counter.customer || f.customer),
-        supply_type: "intra",
-        ...moneyPayload(counterMoney),
-        lines: [{
-          product_id: Number(counter.product),
-          godown_id: Number(counter.godown || f.godown),
-          entered_qty: counter.qty,
-          entered_unit_id: baseUnitOf(Number(counter.product)),
-          rate: counter.rate,
-          gst_rate: counter.gst || undefined,
-        }],
-      }),
-    onSuccess: (b) => {
-      setMsg(
-        `Counter sale ${b.doc_no}: ₹${b.grand_total}` +
-          (Number(b.paid_amount ?? 0) ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}` : "") +
-          ". Stock moved by the bill (no order).",
-      );
-      setCounter({ ...counter, qty: "", rate: "" });
-      setCounterMoney({ ...EMPTY_MONEY });
-      qc.invalidateQueries({ queryKey: ["sales-bills"] });
-      qc.invalidateQueries({ queryKey: ["stock-current"] });
-      qc.invalidateQueries({ queryKey: ["accounts"] });
-    },
-    onError: (e: unknown) => {
-      setMsg(errorMessage(e, "Counter sale failed"));
-    },
+    onError: (e) => fail(e, "Could not dispatch the delivery"),
   });
 
   const bill = useMutation({
     mutationFn: (args: { id: number; money: Record<string, unknown>; supply: string }) =>
       billOrder(args.id, args.money, args.supply),
     onSuccess: (b) => {
-      setMsg(
-        `Billed ${b.doc_no}: ₹${b.grand_total} (COGS ₹${b.cogs_total})` +
-          (Number(b.paid_amount ?? 0) ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}` : "") +
-          ". Delivered goods → no extra stock movement.",
-      );
+      const paid = Number(b.paid_amount ?? 0)
+        ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}`
+        : "";
+      setNote({
+        text:
+          `Billed ${b.doc_no}: ₹${b.grand_total} (COGS ₹${b.cogs_total})${paid}.` +
+          (b.credit_warning ? ` ${b.credit_warning}` : ""),
+        severity: b.credit_warning ? "warning" : "success",
+      });
       setBilling(null);
       qc.invalidateQueries({ queryKey: ["sales-bills"] });
       qc.invalidateQueries({ queryKey: ["stock-current"] });
       qc.invalidateQueries({ queryKey: ["accounts"] });
     },
-    onError: (e: unknown) => {
-      setMsg(errorMessage(e, "Billing failed"));
-    },
+    onError: (e) => fail(e, "Could not post the bill"),
   });
 
   return (
@@ -189,110 +147,71 @@ export function SalesPage() {
       <Typography variant="h4" fontWeight={800}>
         Sales
       </Typography>
-      {msg && <Alert severity={msg.includes("failed") ? "error" : "success"}>{msg}</Alert>}
+      {note && (
+        <Alert severity={note.severity} onClose={() => setNote(null)}>
+          {note.text}
+        </Alert>
+      )}
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            New sale order
-          </Typography>
-          <Box
-            component="form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (f.customer && f.godown && f.product && f.qty) create.mutate();
-            }}
-          >
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-              <TextField label="Customer" select value={f.customer} onChange={(e) => setF({ ...f, customer: e.target.value })} sx={{ minWidth: 180 }}>
-                {(parties.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>))}
-              </TextField>
-              <TextField label="Godown" select value={f.godown} onChange={(e) => setF({ ...f, godown: e.target.value })} sx={{ width: 160 }}>
-                {(godowns.data ?? []).map((g) => (<MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>))}
-              </TextField>
-              <TextField
-                label="Product"
-                select
-                value={f.product}
-                onChange={(e) => {
-                  // pre-fill the rate from the v2 §2 pricing master
-                  const p = products.data?.find((pp) => pp.id === Number(e.target.value));
-                  setF({ ...f, product: e.target.value, rate: p?.sale_price ?? f.rate });
-                }}
-                sx={{ minWidth: 180 }}
-              >
-                {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
-              </TextField>
-              <TextField label="Qty" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} sx={{ width: 100 }} />
-              <TextField label="Rate" value={f.rate} onChange={(e) => setF({ ...f, rate: e.target.value })} sx={{ width: 110 }} />
-              <Button type="submit" variant="contained" sx={{ height: 56 }} disabled={create.isPending}>
-                Place order
-              </Button>
-            </Stack>
-          </Box>
-          {avail.data && (
-            <Typography variant="caption" color="text.secondary">
-              Available now: on hand {avail.data.total_on_hand}, reserved {avail.data.total_reserved},{" "}
-              <strong>available {avail.data.total_available}</strong>. Placing an order reserves stock (no movement yet).
-            </Typography>
-          )}
-        </CardContent>
-      </Card>
+      <SaleDocumentCard
+        title="New sale order"
+        subtitle="reserves stock — nothing moves until delivery"
+        actionLabel="Place order"
+        customer={customer}
+        onCustomer={setCustomer}
+        branch={branch}
+        onBranch={setBranch}
+        parties={parties.data ?? []}
+        branches={branches}
+        godowns={godowns}
+        accounts={accounts.data ?? []}
+        showMoney={false}
+        onSubmit={async (payload) => {
+          const o = await createOrder(payload as Parameters<typeof createOrder>[0]);
+          setNote({
+            text:
+              `Order ${o.doc_no} placed — stock reserved.` +
+              (o.credit_warning ? ` ${o.credit_warning}` : ""),
+            severity: o.credit_warning ? "warning" : "success",
+          });
+          qc.invalidateQueries({ queryKey: ["sale-orders"] });
+          qc.invalidateQueries({ queryKey: ["stock-current"] });
+        }}
+        onError={(e) => fail(e, "Could not place the order")}
+      />
 
-      <Card>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Counter sale <Typography component="span" variant="caption" color="text.secondary">(invoice without an order)</Typography>
-          </Typography>
-          <Box component="form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (counter.product && counter.qty && counter.rate) directBill.mutate();
-            }}>
-            <Stack spacing={2}>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-                <TextField label="Customer" select value={counter.customer || f.customer}
-                  onChange={(e) => setCounter({ ...counter, customer: e.target.value })} sx={{ minWidth: 180 }}>
-                  {(parties.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>))}
-                </TextField>
-                <TextField label="Godown" select value={counter.godown || f.godown}
-                  onChange={(e) => setCounter({ ...counter, godown: e.target.value })} sx={{ width: 160 }}>
-                  {(godowns.data ?? []).map((g) => (<MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>))}
-                </TextField>
-                <TextField label="Product" select value={counter.product}
-                  onChange={(e) => {
-                    const p = products.data?.find((pp) => pp.id === Number(e.target.value));
-                    setCounter({ ...counter, product: e.target.value, gst: p?.gst_rate ?? "", rate: p?.sale_price ?? counter.rate });
-                    if (p?.price_inclusive) setCounterMoney((m) => ({ ...m, price_mode: "inclusive" }));
-                  }} sx={{ minWidth: 180 }}>
-                  {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
-                </TextField>
-                <TextField label="Qty" value={counter.qty}
-                  onChange={(e) => setCounter({ ...counter, qty: e.target.value })} sx={{ width: 100 }} />
-                <TextField label="Rate" value={counter.rate}
-                  onChange={(e) => setCounter({ ...counter, rate: e.target.value })} sx={{ width: 110 }} />
-                <TextField label="GST %" value={counter.gst}
-                  onChange={(e) => setCounter({ ...counter, gst: e.target.value })} sx={{ width: 95 }} />
-              </Stack>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
-                <Box sx={{ flex: 1 }}>
-                  <MoneyFields value={counterMoney} onChange={setCounterMoney} accounts={accounts.data ?? []} compact />
-                </Box>
-                <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1 }}>
-                  <MoneyTotalsPanel totals={counterPreview.data?.totals} />
-                  <Button type="submit" variant="contained" fullWidth sx={{ mt: 2 }}
-                    disabled={directBill.isPending || !counter.product || !counter.qty || !counter.rate}>
-                    Post counter sale
-                  </Button>
-                </Box>
-              </Stack>
-            </Stack>
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            No order and no delivery, so the bill moves the stock itself — nothing is reserved.
-          </Typography>
-        </CardContent>
-      </Card>
+      <SaleDocumentCard
+        title="Counter sale"
+        subtitle="invoice without an order — the bill moves the stock itself"
+        actionLabel="Save & print"
+        customer={customer}
+        onCustomer={setCustomer}
+        branch={branch}
+        onBranch={setBranch}
+        parties={parties.data ?? []}
+        branches={branches}
+        godowns={godowns}
+        accounts={accounts.data ?? []}
+        showMoney
+        onSubmit={async (payload) => {
+          const b = await createDirectBill(payload as Parameters<typeof createDirectBill>[0]);
+          const paid = Number(b.paid_amount ?? 0)
+            ? ` · paid ₹${b.paid_amount} · balance ₹${b.balance_amount}`
+            : "";
+          setNote({
+            text:
+              `Counter sale ${b.doc_no}: ₹${b.grand_total}${paid}.` +
+              (b.credit_warning ? ` ${b.credit_warning}` : ""),
+            severity: b.credit_warning ? "warning" : "success",
+          });
+          qc.invalidateQueries({ queryKey: ["sales-bills"] });
+          qc.invalidateQueries({ queryKey: ["stock-current"] });
+          qc.invalidateQueries({ queryKey: ["accounts"] });
+          // v2 §4: a counter sale ends with paper in the customer's hand
+          window.open(`/print/sales_bill/${b.id}`, "_blank");
+        }}
+        onError={(e) => fail(e, "Could not post the counter sale")}
+      />
 
       <Card>
         <CardContent>
@@ -313,7 +232,9 @@ export function SalesPage() {
                 <TableRow key={o.id}>
                   <TableCell><code>{o.doc_no}</code></TableCell>
                   <TableCell>{partyName(o.customer_id)}</TableCell>
-                  <TableCell><Chip size="small" label={o.status} color={STATUS_COLOR[o.status] ?? "default"} /></TableCell>
+                  <TableCell>
+                    <Chip size="small" label={o.status} color={STATUS_COLOR[o.status] ?? "default"} />
+                  </TableCell>
                   <TableCell align="right">
                     {o.status === "pending" && (
                       <>
@@ -381,10 +302,7 @@ export function SalesPage() {
                   </TableCell>
                   <TableCell align="right">
                     <Button size="small" onClick={() => setHistoryFor(b.id)}>History</Button>
-                    <Button
-                      size="small"
-                      onClick={() => window.open(`/print/sales_bill/${b.id}`, "_blank")}
-                    >
+                    <Button size="small" onClick={() => window.open(`/print/sales_bill/${b.id}`, "_blank")}>
                       Print
                     </Button>
                   </TableCell>
@@ -413,6 +331,146 @@ export function SalesPage() {
         onPost={(money, supply) => billing && bill.mutate({ id: billing, money, supply })}
       />
     </Stack>
+  );
+}
+
+/** The sale order and the counter sale differ only in whether stock is reserved
+ *  or moved and whether money changes hands now, so they share one editor. */
+function SaleDocumentCard({
+  title,
+  subtitle,
+  actionLabel,
+  customer,
+  onCustomer,
+  branch,
+  onBranch,
+  parties,
+  branches,
+  godowns,
+  accounts,
+  showMoney,
+  onSubmit,
+  onError,
+}: {
+  title: string;
+  subtitle: string;
+  actionLabel: string;
+  customer: string;
+  onCustomer: (v: string) => void;
+  branch: string;
+  onBranch: (v: string) => void;
+  parties: { id: number; name: string }[];
+  branches: { id: number; name: string }[];
+  godowns: { id: number; name: string; branch_id: number }[];
+  accounts: { id: number; name: string }[];
+  showMoney: boolean;
+  onSubmit: (payload: Record<string, unknown>) => Promise<void>;
+  onError: (e: unknown) => void;
+}) {
+  const [lines, setLines] = useState<SaleLine[]>([emptyLine()]);
+  const [money, setMoney] = useState<MoneyHeader>({ ...EMPTY_MONEY });
+  const [supply, setSupply] = useState("intra");
+  const [posting, setPosting] = useState(false);
+
+  // a line's godown has to belong to the chosen branch — switching branch
+  // repoints every line rather than leaving one pointing somewhere invalid
+  useEffect(() => {
+    const valid = new Set(godowns.map((g) => String(g.id)));
+    const fallback = godowns[0] ? String(godowns[0].id) : "";
+    setLines((ls) =>
+      ls.map((l) => (l.godown_id && valid.has(l.godown_id) ? l : { ...l, godown_id: fallback })),
+    );
+  }, [godowns]);
+
+  const previewLines = toPreviewLines(lines);
+  const preview = useQuery({
+    queryKey: ["money-preview", previewLines, money, supply],
+    queryFn: () => previewMoney(previewLines, money, supply),
+    enabled: previewLines.length > 0,
+  });
+
+  const ready = !!customer && !!branch && lines.some(isComplete);
+
+  const submit = async () => {
+    if (!ready) return;
+    setPosting(true);
+    try {
+      await onSubmit({
+        customer_id: Number(customer),
+        branch_id: Number(branch),
+        supply_type: supply,
+        ...(showMoney ? moneyPayload(money) : {}),
+        lines: toPayload(lines),
+      });
+      setLines([emptyLine(godowns[0] ? String(godowns[0].id) : "")]);
+      setMoney({ ...EMPTY_MONEY });
+    } catch (e) {
+      onError(e);
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="h6">{title}</Typography>
+        <Typography variant="caption" color="text.secondary">{subtitle}</Typography>
+
+        <Box component="form" onSubmit={(e) => { e.preventDefault(); submit(); }} sx={{ mt: 2 }}>
+          <Stack spacing={2}>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} flexWrap="wrap" useFlexGap>
+              <TextField
+                label="Customer" select size="small" value={customer}
+                onChange={(e) => onCustomer(e.target.value)} sx={{ minWidth: 220 }}
+              >
+                {parties.map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>))}
+              </TextField>
+              <TextField
+                label="Branch" select size="small" value={branch}
+                onChange={(e) => onBranch(e.target.value)} sx={{ minWidth: 180 }}
+                helperText="the godowns below are this branch's"
+              >
+                {branches.map((b) => (<MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>))}
+              </TextField>
+              <TextField
+                label="Supply" select size="small" value={supply}
+                onChange={(e) => setSupply(e.target.value)} sx={{ minWidth: 190 }}
+              >
+                <MenuItem value="intra">Intra (CGST+SGST)</MenuItem>
+                <MenuItem value="inter">Inter (IGST)</MenuItem>
+              </TextField>
+            </Stack>
+
+            <SaleLinesEditor
+              lines={lines}
+              onChange={setLines}
+              godowns={godowns}
+              onPriceModeHint={(inclusive) =>
+                inclusive && setMoney((m) => ({ ...m, price_mode: "inclusive" }))
+              }
+            />
+
+            <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
+              {showMoney && (
+                <Box sx={{ flex: 1 }}>
+                  <MoneyFields value={money} onChange={setMoney} accounts={accounts} compact />
+                </Box>
+              )}
+              <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1, ml: showMoney ? 0 : "auto" }}>
+                <MoneyTotalsPanel totals={preview.data?.totals} />
+                <Button
+                  type="submit" variant="contained" fullWidth sx={{ mt: 2 }}
+                  disabled={posting || !ready}
+                >
+                  {actionLabel}
+                </Button>
+              </Box>
+            </Stack>
+          </Stack>
+        </Box>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -495,7 +553,6 @@ function BillDialog({
     </Dialog>
   );
 }
-
 
 /** v2 §3 "Payment history" — what has settled this invoice and what is left. */
 function PaymentHistoryDialog({

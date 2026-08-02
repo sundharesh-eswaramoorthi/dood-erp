@@ -19,15 +19,15 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
+import { ProductPicker } from "../../components/ProductPicker";
 import { errorMessage } from "../../lib/api";
 import { listAccounts } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
-import { listProducts } from "../products/api";
+import { listProducts, type ProductUnit } from "../products/api";
 import { getFeatureFlags } from "../settings/api";
 import { listGodowns } from "../stock/api";
-import { listUnits } from "../units/api";
 import {
   cancelOrder,
   createBill,
@@ -45,6 +45,10 @@ const EMPTY = { supplier: "", godown: "", supply_type: "intra", product: "", qty
 /** One editable invoice line (v2 §3: godown, qty, rate, discount, HSN, remarks). */
 interface DraftLine {
   product: string;
+  /** what the product may be entered in — carried so the unit select and the
+   *  payload agree without another lookup */
+  units: ProductUnit[];
+  unit_id: string;
   godown: string;
   qty: string;
   rate: string;
@@ -55,7 +59,7 @@ interface DraftLine {
 }
 
 const EMPTY_LINE: DraftLine = {
-  product: "", godown: "", qty: "", rate: "", gst: "",
+  product: "", units: [], unit_id: "", godown: "", qty: "", rate: "", gst: "",
   discount_pct: "", hsn: "", remarks: "",
 };
 
@@ -64,7 +68,6 @@ export function PurchasePage() {
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
   const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
-  const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const bills = useQuery({ queryKey: ["purchase-bills"], queryFn: listBills });
 
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
@@ -123,7 +126,7 @@ export function PurchasePage() {
           product_id: Number(l.product),
           godown_id: Number(l.godown || f.godown),
           entered_qty: l.qty,
-          entered_unit_id: baseUnitOf(Number(l.product)),
+          entered_unit_id: Number(l.unit_id) || baseUnitOf(Number(l.product)),
           rate: l.rate,
           gst_rate: l.gst || undefined,
           discount_pct: l.discount_pct || undefined,
@@ -269,23 +272,28 @@ export function PurchasePage() {
 
               {lines.map((l, i) => (
                 <Stack key={i} direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                  <TextField
-                    size="small" label="Product" select value={l.product}
-                    onChange={(e) => {
+                  <ProductPicker
+                    value={l.product ? Number(l.product) : null}
+                    width={230}
+                    onChange={(p) => {
                       // v2 §2 pricing master pre-fills the line; still editable
-                      const p = products.data?.find((pp) => pp.id === Number(e.target.value));
                       setLine(i, {
-                        product: e.target.value,
+                        product: p ? String(p.id) : "",
+                        units: p?.units ?? [],
+                        unit_id: String(p?.units?.find((u) => u.is_base)?.unit_id ?? p?.base_unit_id ?? ""),
                         gst: p?.gst_rate ?? "",
                         hsn: p?.hsn_code ?? "",
                         rate: p?.purchase_price ?? "",
                       });
                       if (p?.price_inclusive) setMny((m) => ({ ...m, price_mode: "inclusive" }));
                     }}
-                    sx={{ flex: 1, minWidth: 180 }}
+                  />
+                  <TextField
+                    size="small" label="Unit" select value={l.unit_id} disabled={!l.product}
+                    onChange={(e) => setLine(i, { unit_id: e.target.value })} sx={{ width: 100 }}
                   >
-                    {(products.data ?? []).map((p) => (
-                      <MenuItem key={p.id} value={String(p.id)}>{p.code} · {p.name}</MenuItem>
+                    {l.units.map((u) => (
+                      <MenuItem key={u.unit_id} value={String(u.unit_id)}>{u.code}</MenuItem>
                     ))}
                   </TextField>
                   <TextField size="small" label="Godown" select value={l.godown || f.godown}
@@ -362,9 +370,12 @@ export function PurchasePage() {
               <TextField label="Godown" select value={r.godown} onChange={(e) => setR({ ...r, godown: e.target.value })} sx={{ width: 150 }}>
                 {(godowns.data ?? []).map((g) => (<MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>))}
               </TextField>
-              <TextField label="Product" select value={r.product} onChange={(e) => { const gst = products.data?.find((p) => p.id === Number(e.target.value))?.gst_rate ?? ""; setR({ ...r, product: e.target.value, gst }); }} sx={{ minWidth: 160 }}>
-                {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
-              </TextField>
+              <ProductPicker
+                value={r.product ? Number(r.product) : null}
+                size="medium"
+                width={230}
+                onChange={(p) => setR({ ...r, product: p ? String(p.id) : "", gst: p?.gst_rate ?? "" })}
+              />
               <TextField label="Qty" value={r.qty} onChange={(e) => setR({ ...r, qty: e.target.value })} sx={{ width: 90 }} />
               <TextField label="Rate" value={r.rate} onChange={(e) => setR({ ...r, rate: e.target.value })} sx={{ width: 100 }} />
               <TextField label="GST %" value={r.gst} onChange={(e) => setR({ ...r, gst: e.target.value })} sx={{ width: 90 }} />
@@ -393,13 +404,19 @@ export function PurchasePage() {
               }}
             >
               <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }} flexWrap="wrap" useFlexGap>
-                <TextField label="Product" select value={po.product || f.product}
-                  onChange={(e) => {
-                    const p = products.data?.find((pp) => pp.id === Number(e.target.value));
-                    setPo({ ...po, product: e.target.value, gst: p?.gst_rate ?? "", rate: p?.purchase_price ?? po.rate });
-                  }} sx={{ minWidth: 200 }}>
-                  {(products.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.code}</MenuItem>))}
-                </TextField>
+                <ProductPicker
+                  value={(po.product || f.product) ? Number(po.product || f.product) : null}
+                  size="medium"
+                  width={230}
+                  onChange={(p) =>
+                    setPo({
+                      ...po,
+                      product: p ? String(p.id) : "",
+                      gst: p?.gst_rate ?? "",
+                      rate: p?.purchase_price ?? po.rate,
+                    })
+                  }
+                />
                 <TextField label="Qty" value={po.qty} onChange={(e) => setPo({ ...po, qty: e.target.value })} sx={{ width: 100 }} />
                 <TextField label="Rate" value={po.rate} onChange={(e) => setPo({ ...po, rate: e.target.value })} sx={{ width: 110 }} />
                 <TextField label="GST %" value={po.gst} onChange={(e) => setPo({ ...po, gst: e.target.value })} sx={{ width: 95 }} />

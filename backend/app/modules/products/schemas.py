@@ -104,6 +104,16 @@ class ProductOut(BaseModel):
     opening_branch_id: int | None
 
 
+class ProductUnitOut(BaseModel):
+    """A unit this product may be entered in, and its size in base units."""
+
+    unit_id: int
+    code: str
+    name: str
+    factor_to_base: Decimal
+    is_base: bool
+
+
 class ProductListItem(ProductOut):
     """v2 §2 wants stock quantity and stock value on the product list."""
 
@@ -112,3 +122,5 @@ class ProductListItem(ProductOut):
     avg_cost: Decimal = Decimal(0)
     min_stock_qty: Decimal | None = None
     low_stock: bool = False
+    # base unit + every conversion, so an invoice line can offer the sub-unit
+    units: list[ProductUnitOut] = []

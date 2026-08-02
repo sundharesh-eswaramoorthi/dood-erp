@@ -89,6 +89,20 @@ async def list_products(
                 ") "
                 "SELECT * FROM ("
                 "  SELECT p.*, "
+                # Which units this product may be entered in: its base unit plus
+                # every conversion (the sub-unit is mirrored into that table).
+                # Sent with the list so a line editor needs no extra round trip.
+                "         ("
+                "           SELECT json_agg(json_build_object("
+                "                    'unit_id', u.id, 'code', u.code, 'name', u.name, "
+                "                    'factor_to_base', x.factor, 'is_base', x.factor = 1) "
+                "                  ORDER BY x.factor DESC) "
+                "           FROM ( SELECT p.base_unit_id AS uid, 1::numeric AS factor "
+                "                  UNION ALL "
+                "                  SELECT uc.from_unit_id, uc.factor_to_base "
+                "                  FROM unit_conversion uc WHERE uc.product_id = p.id ) x "
+                "           JOIN unit_of_measure u ON u.id = x.uid "
+                "         )                                               AS units, "
                 "         COALESCE(bal.qty, 0)                            AS stock_qty, "
                 "         COALESCE(cost.avg_cost, 0)                      AS avg_cost, "
                 "         COALESCE(bal.qty, 0) * COALESCE(cost.avg_cost, 0) AS stock_value, "

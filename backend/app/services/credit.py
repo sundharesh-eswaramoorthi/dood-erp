@@ -1,12 +1,16 @@
-"""Credit-limit enforcement (v2 §1).
+"""Credit-limit checking (v2 §1).
 
 party.credit_limit has existed since Phase 1 but nothing ever read it. v2 lists
-it as a party field, so it now gates the two places where a customer's exposure
-actually grows: confirming a sale order and posting a sales bill.
+it as a party field, so it is now checked at the two places where a customer's
+exposure actually grows: confirming a sale order and posting a sales bill.
 
-NULL / 0 credit_limit == no limit. The check is a hard block by default; set the
-system_setting `feature.credit_limit_block` to {"enabled": false} to downgrade
-it to advisory (the caller then just logs the breach).
+NULL / 0 credit_limit == no limit.
+
+The breach is ADVISORY by default: the document posts and the caller is handed
+a warning to show. A wholesale counter cannot stop mid-sale to raise a limit,
+and refusing the invoice after the goods have gone out helps nobody. Set the
+system_setting `feature.credit_limit_block` to {"enabled": true} to make it a
+hard 409 instead.
 """
 from __future__ import annotations
 
@@ -32,7 +36,7 @@ class CreditLimitExceeded(Exception):
 
 
 async def blocking_enabled(session: AsyncSession, org_id: int) -> bool:
-    """Default ON — unlike the feature.* flags, absence means "enforce"."""
+    """Default OFF — the limit warns unless the org explicitly asks to block."""
     row = (
         await session.execute(
             text(
@@ -42,16 +46,18 @@ async def blocking_enabled(session: AsyncSession, org_id: int) -> bool:
             {"o": org_id},
         )
     ).scalar_one_or_none()
-    return row != "false"
+    return row == "true"
 
 
 async def check(
     session: AsyncSession, org_id: int, party_id: int, additional: Decimal
-) -> None:
-    """Raise CreditLimitExceeded if `additional` would breach the party's limit.
+) -> str | None:
+    """The warning to show if `additional` breaches the party's limit, else None.
 
     Exposure is the receivable side only: what they already owe us plus what
     this document adds. Payables (we owe them) never consume customer credit.
+
+    Raises CreditLimitExceeded only when the org has switched blocking on.
     """
     row = (
         await session.execute(
@@ -60,10 +66,10 @@ async def check(
         )
     ).mappings().first()
     if row is None or row["credit_limit"] is None:
-        return
+        return None
     limit = Decimal(row["credit_limit"])
     if limit <= 0:
-        return
+        return None
 
     outstanding = Decimal(
         (
@@ -78,7 +84,11 @@ async def check(
         or 0
     )
     if outstanding + additional <= limit:
-        return
-    if not await blocking_enabled(session, org_id):
-        return
-    raise CreditLimitExceeded(row["name"], limit, outstanding, additional)
+        return None
+    if await blocking_enabled(session, org_id):
+        raise CreditLimitExceeded(row["name"], limit, outstanding, additional)
+    return (
+        f"{row['name']}'s credit limit is exceeded — limit ₹{limit}, "
+        f"already outstanding ₹{outstanding}, this document ₹{additional} "
+        f"(₹{outstanding + additional} in total)."
+    )

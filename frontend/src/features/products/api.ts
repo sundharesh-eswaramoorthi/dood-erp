@@ -7,6 +7,15 @@ export interface Category {
   is_active: boolean;
 }
 
+export interface ProductUnit {
+  unit_id: number;
+  code: string;
+  name: string;
+  /** how many base units one of these is (1 BAG = 1, 1 KG of a 25kg bag = 0.04) */
+  factor_to_base: string;
+  is_base: boolean;
+}
+
 export interface Product {
   id: number;
   code: string;
@@ -35,6 +44,8 @@ export interface Product {
   avg_cost?: string;
   min_stock_qty?: string | null;
   low_stock?: boolean;
+  /** base unit + every conversion — what an invoice line may be entered in */
+  units?: ProductUnit[];
 }
 
 export interface ProductCreate {
@@ -69,6 +80,7 @@ export interface ProductFilters {
   low_stock?: boolean;
   sort?: string;
   direction?: "asc" | "desc";
+  limit?: number;
 }
 
 export async function listProducts(filters: ProductFilters | string = {}): Promise<Product[]> {

@@ -67,6 +67,9 @@ class SaleOrderOut(BaseModel):
     round_off: Decimal = Decimal(0)
     grand_total: Decimal = Decimal(0)
     note: str | None = None
+    # v2 §1: set when the customer is over their credit limit. The document
+    # still posted — this is for the operator to see, not a refusal.
+    credit_warning: str | None = None
     lines: list[OrderLineOut]
 
 
@@ -145,6 +148,7 @@ class SalesBillOut(MoneyTotalsOut):
     bill_date: dt.date
     doc_datetime: dt.datetime | None = None
     cogs_total: Decimal
+    credit_warning: str | None = None
     lines: list[SalesBillLineOut]
 
 
