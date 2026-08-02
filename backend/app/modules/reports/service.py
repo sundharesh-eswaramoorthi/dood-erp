@@ -153,14 +153,26 @@ async def sales_by_branch(session, principal, f: Filters) -> dict:
 
 
 async def sales_by_payment_mode(session, principal, f: Filters) -> dict:
-    """v2 §6 "Payment Mode-wise Sales" — reads the payment_type master added in
-    V2.7. Bills with no type recorded group under 'Unspecified'."""
+    """v2 §6 "Payment Mode-wise Sales".
+
+    Grouped by TENDER, not by invoice: since V2.14 one bill can be part cash and
+    part UPI, and attributing the whole invoice to a single mode would overstate
+    whichever one happened to be recorded on the header. `amount` is therefore
+    the money actually taken in that mode, and the counts are of tenders.
+    Anything unpaid has no tender at all and lands in 'Unpaid / on credit'.
+    """
     rows = await _rows(session,
-        f"SELECT COALESCE(pt.name,'Unspecified') AS payment_type, COUNT(*) AS bills, "
-        f"SUM(sb.grand_total) AS total, SUM(sb.paid_amount) AS paid, "
-        f"SUM(sb.balance_amount) AS balance "
-        f"FROM sales_bill sb LEFT JOIN payment_type pt ON pt.id = sb.payment_type_id "
-        f"WHERE {_sales_where(f)} GROUP BY pt.name ORDER BY total DESC", f.params())
+        f"SELECT COALESCE(pt.name,'Unspecified') AS payment_type, "
+        f"COUNT(*) AS tenders, COUNT(DISTINCT sb.id) AS bills, "
+        f"SUM(dp.amount) AS amount "
+        f"FROM sales_bill sb "
+        f"JOIN document_payment dp ON dp.doc_type='sales_bill' AND dp.doc_id = sb.id "
+        f"LEFT JOIN payment_type pt ON pt.id = dp.payment_type_id "
+        f"WHERE {_sales_where(f)} GROUP BY pt.name "
+        f"UNION ALL "
+        f"SELECT 'Unpaid / on credit', 0, COUNT(*), SUM(sb.balance_amount) "
+        f"FROM sales_bill sb WHERE {_sales_where(f)} AND sb.balance_amount > 0 "
+        f"ORDER BY amount DESC", f.params())
     return {"summary": await _sales_summary_row(session, f), "rows": rows}
 
 

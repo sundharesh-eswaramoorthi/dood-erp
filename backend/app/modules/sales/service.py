@@ -78,7 +78,7 @@ async def _post_receivable(
     totals: money.Totals,
     cogs_total: Decimal,
     bill_date,
-    payment_account_id: int | None,
+    splits,
 ) -> str | None:
     """The money tail every sales bill shares, whether it came from an order or
     straight off the counter. Keeping it in one place is what stops the two
@@ -98,8 +98,8 @@ async def _post_receivable(
     )
     await doc_money.settle_at_post(
         session, org_id=principal.org_id, branch_id=branch, party_id=customer_id,
-        account_id=payment_account_id, doc_type="sales_bill", doc_id=bill_id,
-        amount=totals.paid_amount, effective_date=bill_date, created_by=principal.user_id,
+        doc_type="sales_bill", doc_id=bill_id, splits=splits,
+        effective_date=bill_date, created_by=principal.user_id,
         party_side="credit", account_direction="in",
     )
     return warning
@@ -555,7 +555,7 @@ async def bill_order(
     warning = await _post_receivable(
         session, principal, bill_id=bill_id, branch=branch, customer_id=order["customer_id"],
         totals=t, cogs_total=cogs_total, bill_date=bill_date,
-        payment_account_id=opts.payment_account_id,
+        splits=opts.settlement(),
     )
     # order fully fulfilled now?
     undelivered = (
@@ -663,7 +663,7 @@ async def post_direct_bill(
     warning = await _post_receivable(
         session, principal, bill_id=bill_id, branch=branch, customer_id=data.customer_id,
         totals=t, cogs_total=cogs_total, bill_date=bill_date,
-        payment_account_id=data.payment_account_id,
+        splits=data.settlement(),
     )
     await emit(session, principal.org_id, "sale.bill",
                {"bill_id": bill_id, "order_id": None, "counter_sale": True,
@@ -771,8 +771,8 @@ async def post_sales_return(session: AsyncSession, principal: Principal, data: S
     # cash refunded to the customer at the counter
     await doc_money.settle_at_post(
         session, org_id=principal.org_id, branch_id=branch, party_id=data.customer_id,
-        account_id=data.payment_account_id, doc_type="sales_return", doc_id=ret_id,
-        amount=t.paid_amount, effective_date=rdate, created_by=principal.user_id,
+        doc_type="sales_return", doc_id=ret_id, splits=data.settlement(),
+        effective_date=rdate, created_by=principal.user_id,
         party_side="debit", account_direction="out",
     )
     await emit(session, principal.org_id, "sale.return", {"return_id": ret_id, "customer_id": data.customer_id})

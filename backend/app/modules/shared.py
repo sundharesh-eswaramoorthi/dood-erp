@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class MoneyLineIn(BaseModel):
@@ -22,6 +22,20 @@ class MoneyLineIn(BaseModel):
     remarks: str | None = None
 
 
+class PaymentSplitIn(BaseModel):
+    """One tender against a document (v2 §3 "split payment").
+
+    account_id says WHERE the money landed, payment_type_id says HOW it was
+    taken. They are different questions — two cards and a UPI can all settle
+    into the same bank account, and the payment-mode reports need the second.
+    """
+
+    account_id: int
+    payment_type_id: int | None = None
+    amount: Decimal = Field(gt=0)
+    reference: str | None = Field(default=None, max_length=120)  # cheque no, UPI ref
+
+
 class MoneyHeaderIn(BaseModel):
     """Header money block: entry mode, overall discount, charges, settlement."""
 
@@ -32,8 +46,37 @@ class MoneyHeaderIn(BaseModel):
     round_off: Decimal | None = None    # None = auto to the nearest rupee
     paid_amount: Decimal = Field(default=Decimal(0), ge=0)
     payment_account_id: int | None = None   # required when paid_amount > 0
+    # v2 §3: several tenders on one document. Supplying this replaces the single
+    # paid_amount/payment_account_id pair, which stays for the one-tender case.
+    payments: list[PaymentSplitIn] = []
     remarks: str | None = None
     doc_datetime: dt.datetime | None = None
+
+    @model_validator(mode="after")
+    def _splits_agree_with_paid(self):
+        """paid_amount is what the money engine subtracts to get the balance, so
+        it has to be exactly what the tenders add up to — otherwise the invoice
+        would claim a balance the cash drawer disagrees with."""
+        if not self.payments:
+            return self
+        total = sum((p.amount for p in self.payments), Decimal(0))
+        if "paid_amount" in self.model_fields_set and self.paid_amount != total:
+            raise ValueError(
+                f"the payment split adds up to {total}, but paid_amount says {self.paid_amount}"
+            )
+        object.__setattr__(self, "paid_amount", total)
+        return self
+
+    def settlement(self) -> list[PaymentSplitIn]:
+        """The tenders to post, however the caller expressed them."""
+        if self.payments:
+            return self.payments
+        if self.paid_amount > 0 and self.payment_account_id is not None:
+            return [PaymentSplitIn(account_id=self.payment_account_id, amount=self.paid_amount)]
+        return []
+
+    def settled_total(self) -> Decimal:
+        return sum((p.amount for p in self.settlement()), Decimal(0))
 
 
 class MoneyLineOut(BaseModel):

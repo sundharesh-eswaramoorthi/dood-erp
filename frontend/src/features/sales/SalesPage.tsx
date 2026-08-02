@@ -25,7 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { errorMessage } from "../../lib/api";
 import { useAuth } from "../../store/auth";
-import { billPayments, listAccounts } from "../accounts/api";
+import { billPayments, listAccounts, listPaymentTypes } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
@@ -71,6 +71,7 @@ export function SalesPage() {
   const orders = useQuery({ queryKey: ["sale-orders"], queryFn: listOrders });
   const bills = useQuery({ queryKey: ["sales-bills"], queryFn: listBills });
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
+  const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
 
   const [note, setNote] = useState<Note | null>(null);
   const [billing, setBilling] = useState<number | null>(null);
@@ -165,6 +166,7 @@ export function SalesPage() {
         branches={branches}
         godowns={godowns}
         accounts={accounts.data ?? []}
+        paymentTypes={paymentTypes.data ?? []}
         showMoney={false}
         onSubmit={async (payload) => {
           const o = await createOrder(payload as Parameters<typeof createOrder>[0]);
@@ -192,6 +194,7 @@ export function SalesPage() {
         branches={branches}
         godowns={godowns}
         accounts={accounts.data ?? []}
+        paymentTypes={paymentTypes.data ?? []}
         showMoney
         onSubmit={async (payload) => {
           const b = await createDirectBill(payload as Parameters<typeof createDirectBill>[0]);
@@ -325,6 +328,7 @@ export function SalesPage() {
       <BillDialog
         orderId={billing}
         accounts={accounts.data ?? []}
+        paymentTypes={paymentTypes.data ?? []}
         products={products.data ?? []}
         posting={bill.isPending}
         onClose={() => setBilling(null)}
@@ -348,6 +352,7 @@ function SaleDocumentCard({
   branches,
   godowns,
   accounts,
+  paymentTypes,
   showMoney,
   onSubmit,
   onError,
@@ -363,6 +368,7 @@ function SaleDocumentCard({
   branches: { id: number; name: string }[];
   godowns: { id: number; name: string; branch_id: number }[];
   accounts: { id: number; name: string }[];
+  paymentTypes: { id: number; name: string }[];
   showMoney: boolean;
   onSubmit: (payload: Record<string, unknown>) => Promise<void>;
   onError: (e: unknown) => void;
@@ -454,7 +460,8 @@ function SaleDocumentCard({
             <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
               {showMoney && (
                 <Box sx={{ flex: 1 }}>
-                  <MoneyFields value={money} onChange={setMoney} accounts={accounts} compact />
+                  <MoneyFields value={money} onChange={setMoney} accounts={accounts}
+                    paymentTypes={paymentTypes} compact />
                 </Box>
               )}
               <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1, ml: showMoney ? 0 : "auto" }}>
@@ -479,6 +486,7 @@ function SaleDocumentCard({
 function BillDialog({
   orderId,
   accounts,
+  paymentTypes,
   products,
   posting,
   onClose,
@@ -486,6 +494,7 @@ function BillDialog({
 }: {
   orderId: number | null;
   accounts: { id: number; name: string }[];
+  paymentTypes: { id: number; name: string }[];
   products: { id: number; gst_rate: string | null }[];
   posting: boolean;
   onClose: () => void;
@@ -532,7 +541,8 @@ function BillDialog({
           <Divider />
           <Stack direction={{ xs: "column", md: "row" }} spacing={3} alignItems="flex-start">
             <Box sx={{ flex: 1 }}>
-              <MoneyFields value={mny} onChange={setMny} accounts={accounts} compact />
+              <MoneyFields value={mny} onChange={setMny} accounts={accounts}
+                paymentTypes={paymentTypes} compact />
             </Box>
             <Box sx={{ p: 2, bgcolor: "#FCFAF6", borderRadius: 1 }}>
               <MoneyTotalsPanel totals={preview.data?.totals} />

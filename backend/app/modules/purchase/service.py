@@ -144,8 +144,8 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
     # anything paid on the spot settles straight back out of cash/bank
     await doc_money.settle_at_post(
         session, org_id=principal.org_id, branch_id=branch_id, party_id=data.supplier_id,
-        account_id=data.payment_account_id, doc_type="purchase_bill", doc_id=bill_id,
-        amount=t.paid_amount, effective_date=bill_date, created_by=principal.user_id,
+        doc_type="purchase_bill", doc_id=bill_id, splits=data.settlement(),
+        effective_date=bill_date, created_by=principal.user_id,
         party_side="debit", account_direction="out",
     )
     await emit(session, principal.org_id, "purchase.bill",
@@ -260,8 +260,8 @@ async def post_return(session: AsyncSession, principal: Principal, data: Purchas
     # a refund taken in cash at return time: money comes back IN to us
     await doc_money.settle_at_post(
         session, org_id=principal.org_id, branch_id=branch_id, party_id=data.supplier_id,
-        account_id=data.payment_account_id, doc_type="purchase_return", doc_id=ret_id,
-        amount=t.paid_amount, effective_date=rdate, created_by=principal.user_id,
+        doc_type="purchase_return", doc_id=ret_id, splits=data.settlement(),
+        effective_date=rdate, created_by=principal.user_id,
         party_side="credit", account_direction="in",
     )
     await emit(session, principal.org_id, "purchase.return",
@@ -354,8 +354,8 @@ async def create_po(session: AsyncSession, principal: Principal, data: PurchaseO
     # owes us until they deliver: DEBIT the party, money OUT of the account.
     await doc_money.settle_at_post(
         session, org_id=principal.org_id, branch_id=branch_id, party_id=data.supplier_id,
-        account_id=data.payment_account_id, doc_type="purchase_order", doc_id=po_id,
-        amount=t.paid_amount, effective_date=order_date, created_by=principal.user_id,
+        doc_type="purchase_order", doc_id=po_id, splits=data.settlement(),
+        effective_date=order_date, created_by=principal.user_id,
         party_side="debit", account_direction="out",
     )
     await emit(session, principal.org_id, "purchase.order",
@@ -478,6 +478,7 @@ async def receive_po(
             round_off=data.round_off,
             paid_amount=data.paid_amount,
             payment_account_id=data.payment_account_id,
+            payments=data.payments,
             remarks=data.remarks,
             doc_datetime=data.doc_datetime,
             lines=lines,

@@ -41,11 +41,19 @@ export interface VoucherResult {
 
 export async function postVoucher(payload: {
   party_id: number;
-  account_id: number;
   voucher_type: string;
-  amount: string;
   note?: string;
+  /** single-tender form — or send `payments` instead */
+  account_id?: number;
+  amount?: string;
   payment_type_id?: number;
+  /** v2 §3 split payment: the server derives amount and the header account */
+  payments?: {
+    account_id: number;
+    payment_type_id?: number;
+    amount: string;
+    reference?: string;
+  }[];
   /** omit to settle the oldest bills first; [] to leave it on account */
   allocations?: { against_entry_id: number; amount: string }[];
 }): Promise<VoucherResult> {

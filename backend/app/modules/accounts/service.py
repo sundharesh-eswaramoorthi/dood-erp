@@ -65,11 +65,29 @@ async def post_voucher(session: AsyncSession, principal: Principal, data: Vouche
     party = (await session.execute(select(Party).where(Party.id == data.party_id))).scalar_one_or_none()
     if party is None:
         raise ValueError("party not found")
-    acct = (
-        await session.execute(text("SELECT id FROM cash_bank_account WHERE id=:a"), {"a": data.account_id})
-    ).scalar_one_or_none()
-    if acct is None:
-        raise ValueError("account not found")
+
+    # Check every tender before writing anything: the voucher header carries the
+    # first split's account, so a bad id would otherwise surface as a raw
+    # foreign-key 500 from the INSERT below rather than a 422 naming it.
+    splits = data.settlement()
+    for split in splits:
+        ok = (
+            await session.execute(
+                text("SELECT 1 FROM cash_bank_account WHERE id=:a AND org_id=:o AND is_active"),
+                {"a": split.account_id, "o": principal.org_id},
+            )
+        ).scalar_one_or_none()
+        if ok is None:
+            raise ValueError(f"payment account {split.account_id} not found")
+        if split.payment_type_id is not None:
+            ok = (
+                await session.execute(
+                    text("SELECT 1 FROM payment_type WHERE id=:p AND org_id=:o AND is_active"),
+                    {"p": split.payment_type_id, "o": principal.org_id},
+                )
+            ).scalar_one_or_none()
+            if ok is None:
+                raise ValueError(f"payment type {split.payment_type_id} not found")
 
     vdate = data.voucher_date or dt.date.today()
     number = await allocate(session, principal.org_id, None, "payment_voucher")
@@ -94,10 +112,27 @@ async def post_voucher(session: AsyncSession, principal: Principal, data: Vouche
         entry_side=party_side, amount=data.amount, source=("payment_voucher", vid, 0),
         effective_date=vdate, created_by=principal.user_id,
     )
-    acct_bal = await post_account_entry(
-        session, org_id=principal.org_id, account_id=data.account_id, direction=acct_dir,
-        amount=data.amount, source=("payment_voucher", vid, 0), effective_date=vdate, created_by=principal.user_id,
-    )
+    # v2 §3 split payment: the party sees one receipt, but the cash may have
+    # arrived through several accounts, so each tender gets its own account
+    # entry (seq = source_line_no) and its own document_payment row.
+    acct_bal = Decimal(0)
+    for seq, split in enumerate(splits):
+        acct_bal = await post_account_entry(
+            session, org_id=principal.org_id, account_id=split.account_id, direction=acct_dir,
+            amount=split.amount, source=("payment_voucher", vid, seq),
+            effective_date=vdate, created_by=principal.user_id,
+        )
+        await session.execute(
+            text(
+                "INSERT INTO document_payment "
+                "(org_id, branch_id, doc_type, doc_id, seq, account_id, payment_type_id, "
+                " amount, reference) "
+                "VALUES (:o,:b,'payment_voucher',:di,:s,:a,:pt,:amt,:ref)"
+            ),
+            {"o": principal.org_id, "b": branch_id, "di": vid, "s": seq,
+             "a": split.account_id, "pt": split.payment_type_id, "amt": split.amount,
+             "ref": split.reference},
+        )
     # v2 §3 payment history — say which bills this settles.
     #   allocations given  -> exactly those
     #   allocations omitted-> oldest open items first (the usual counter behaviour)
@@ -117,6 +152,11 @@ async def post_voucher(session: AsyncSession, principal: Principal, data: Vouche
     return {"id": vid, "doc_no": number, "voucher_type": data.voucher_type, "party_id": data.party_id,
             "account_id": data.account_id, "amount": data.amount, "account_balance": acct_bal,
             "party_net": party_net, "payment_type_id": data.payment_type_id,
+            "payments": [
+                {"seq": i, "account_id": s.account_id, "payment_type_id": s.payment_type_id,
+                 "amount": s.amount, "reference": s.reference}
+                for i, s in enumerate(splits)
+            ],
             "allocations": made, "unallocated": Decimal(data.amount) - applied}
 
 

@@ -19,6 +19,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { errorMessage } from "../../lib/api";
+import { usableSplits, type PaymentSplit } from "../money/api";
+import { PaymentSplits } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
 import {
   createAccount,
@@ -51,6 +53,7 @@ export function AccountsPage() {
   const [v, setV] = useState({ party: "", account: "", type: "receipt", amount: "", note: "", payment_type: "" });
   // v2 §3: which bills this settles. Empty selection = oldest first (FIFO).
   const [picked, setPicked] = useState<Record<number, string>>({});
+  const [splits, setSplits] = useState<PaymentSplit[]>([]);
   const [newPayType, setNewPayType] = useState("");
   const [ex, setEx] = useState({ account: "", category: "", amount: "", note: "" });
   const [msg, setMsg] = useState<string | null>(null);
@@ -98,9 +101,14 @@ export function AccountsPage() {
         party_id: Number(v.party),
         account_id: Number(v.account),
         voucher_type: v.type,
-        amount: v.amount,
         note: v.note,
-        payment_type_id: v.payment_type ? Number(v.payment_type) : undefined,
+        // the server derives amount and the header account from the tenders
+        payments: usableSplits(splits).map((p) => ({
+          account_id: p.account_id as number,
+          payment_type_id: p.payment_type_id ?? undefined,
+          amount: p.amount,
+          reference: p.reference || undefined,
+        })),
         // omit entirely to let the server settle the oldest bills first
         ...(chosen.length ? { allocations: chosen } : {}),
       });
@@ -112,6 +120,7 @@ export function AccountsPage() {
         : "";
       setMsg(`${r.doc_no}: account balance ₹${r.account_balance}, party net ₹${r.party_net}.${applied}`);
       setV({ ...v, amount: "", note: "" });
+      setSplits([]);
       setPicked({});
       qc.invalidateQueries({ queryKey: ["accounts"] });
       qc.invalidateQueries({ queryKey: ["vouchers"] });
@@ -173,26 +182,27 @@ export function AccountsPage() {
           <Typography variant="h6" gutterBottom>
             Record receipt / payment
           </Typography>
-          <Box component="form" onSubmit={(e) => { e.preventDefault(); if (v.party && v.account && v.amount) pay.mutate(); }}>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
-              <TextField label="Type" select value={v.type} onChange={(e) => setV({ ...v, type: e.target.value })} sx={{ width: 160 }}>
-                <MenuItem value="receipt">Receipt (money in)</MenuItem>
-                <MenuItem value="payment">Payment (money out)</MenuItem>
-              </TextField>
-              <TextField label="Party" select value={v.party} onChange={(e) => setV({ ...v, party: e.target.value })} sx={{ minWidth: 180 }}>
-                {(parties.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>))}
-              </TextField>
-              <TextField label="Account" select value={v.account} onChange={(e) => setV({ ...v, account: e.target.value })} sx={{ minWidth: 160 }}>
-                {(accounts.data ?? []).map((a) => (<MenuItem key={a.id} value={String(a.id)}>{a.name}</MenuItem>))}
-              </TextField>
-              <TextField label="Amount" value={v.amount} onChange={(e) => setV({ ...v, amount: e.target.value })} sx={{ width: 120 }} />
-              <TextField label="Payment type" select value={v.payment_type}
-                onChange={(e) => setV({ ...v, payment_type: e.target.value })} sx={{ minWidth: 150 }}>
-                <MenuItem value=""><em>Unspecified</em></MenuItem>
-                {(paymentTypes.data ?? []).map((t) => (<MenuItem key={t.id} value={String(t.id)}>{t.name}</MenuItem>))}
-              </TextField>
-              <TextField label="Note" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} />
-              <Button type="submit" variant="contained" disabled={pay.isPending}>Post</Button>
+          <Box component="form" onSubmit={(e) => { e.preventDefault(); if (v.party && usableSplits(splits).length) pay.mutate(); }}>
+            <Stack spacing={2}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                <TextField label="Type" select value={v.type} onChange={(e) => setV({ ...v, type: e.target.value })} sx={{ width: 160 }}>
+                  <MenuItem value="receipt">Receipt (money in)</MenuItem>
+                  <MenuItem value="payment">Payment (money out)</MenuItem>
+                </TextField>
+                <TextField label="Party" select value={v.party} onChange={(e) => setV({ ...v, party: e.target.value })} sx={{ minWidth: 180 }}>
+                  {(parties.data ?? []).map((p) => (<MenuItem key={p.id} value={String(p.id)}>{p.name}</MenuItem>))}
+                </TextField>
+                <TextField label="Note" value={v.note} onChange={(e) => setV({ ...v, note: e.target.value })} sx={{ flex: 1, minWidth: 180 }} />
+                <Button type="submit" variant="contained" disabled={pay.isPending}>Post</Button>
+              </Stack>
+              {/* v2 §3: one receipt can arrive part cash, part UPI */}
+              <PaymentSplits
+                value={splits}
+                onChange={setSplits}
+                accounts={accounts.data ?? []}
+                paymentTypes={paymentTypes.data ?? []}
+                label={v.type === "receipt" ? "Received" : "Paid"}
+              />
             </Stack>
 
             {(openItems.data ?? []).length > 0 && (

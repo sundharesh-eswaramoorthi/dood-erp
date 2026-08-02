@@ -94,6 +94,18 @@ class PurchaseOrderCreate(MoneyHeaderIn):
     # a PO is not paid, it is advanced against
     paid_amount: Decimal = Field(default=Decimal(0), ge=0, exclude=True)
 
+    def settlement(self):
+        """The advance is this document's tender, so a split advance splits the
+        same way a split payment does."""
+        from app.modules.shared import PaymentSplitIn
+
+        if self.payments:
+            return self.payments
+        if self.advance_amount > 0 and self.payment_account_id is not None:
+            return [PaymentSplitIn(account_id=self.payment_account_id,
+                                   amount=self.advance_amount)]
+        return []
+
 
 class POLineOut(MoneyLineOut):
     received_qty: Decimal = Decimal(0)

@@ -218,6 +218,15 @@ async def reverse_document(
     party = await _reverse_party(session, principal, doc_type, doc_id)
     acct = await _reverse_account(session, principal, doc_type, doc_id)
 
+    # The tender breakdown describes money this document took. The account
+    # entries above have been negated, so leaving these would keep a cancelled
+    # invoice showing in the payment-mode reports. Like ledger_allocation, this
+    # is a live description rather than a ledger, so it is deleted, not negated.
+    await session.execute(
+        text("DELETE FROM document_payment WHERE org_id=:o AND doc_type=:t AND doc_id=:i"),
+        {"o": principal.org_id, "t": doc_type, "i": doc_id},
+    )
+
     # a sales bill that moved stock recorded fulfilment against its order;
     # once reversed the order is unfulfilled again
     if doc_type == "sales_bill":

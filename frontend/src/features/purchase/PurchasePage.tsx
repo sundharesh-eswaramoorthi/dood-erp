@@ -21,7 +21,7 @@ import { useEffect, useState } from "react";
 
 import { ProductPicker } from "../../components/ProductPicker";
 import { errorMessage } from "../../lib/api";
-import { listAccounts } from "../accounts/api";
+import { listAccounts, listPaymentTypes } from "../accounts/api";
 import { EMPTY_MONEY, moneyPayload, previewMoney, type MoneyHeader } from "../money/api";
 import { MoneyFields, MoneyTotalsPanel } from "../money/MoneyBlock";
 import { listParties } from "../parties/api";
@@ -71,6 +71,7 @@ export function PurchasePage() {
   const bills = useQuery({ queryKey: ["purchase-bills"], queryFn: listBills });
 
   const accounts = useQuery({ queryKey: ["accounts"], queryFn: listAccounts });
+  const paymentTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
   const [f, setF] = useState(EMPTY);
   const [r, setR] = useState(EMPTY);
   const [lines, setLines] = useState<DraftLine[]>([{ ...EMPTY_LINE }]);

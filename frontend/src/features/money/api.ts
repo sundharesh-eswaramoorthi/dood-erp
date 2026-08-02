@@ -1,5 +1,30 @@
 import { api } from "../../lib/api";
 
+/** One tender against a document (v2 §3 split payment): where the money landed
+ *  and how it was taken. */
+export interface PaymentSplit {
+  account_id: number | null;
+  payment_type_id: number | null;
+  amount: string;
+  reference: string;
+}
+
+export const EMPTY_SPLIT: PaymentSplit = {
+  account_id: null,
+  payment_type_id: null,
+  amount: "",
+  reference: "",
+};
+
+/** A tender is worth sending once it names an account and an amount. */
+export function usableSplits(splits: PaymentSplit[]): PaymentSplit[] {
+  return splits.filter((p) => p.account_id != null && Number(p.amount) > 0);
+}
+
+export function splitTotal(splits: PaymentSplit[]): number {
+  return usableSplits(splits).reduce((n, p) => n + Number(p.amount), 0);
+}
+
 /** Header money block shared by every invoice-shaped document (v2 §3/§4). */
 export interface MoneyHeader {
   price_mode: string;
@@ -9,6 +34,9 @@ export interface MoneyHeader {
   round_off: string | null;
   paid_amount: string;
   payment_account_id: number | null;
+  /** v2 §3: several tenders on one document. When non-empty this replaces
+   *  paid_amount/payment_account_id, and the server derives paid_amount. */
+  payments: PaymentSplit[];
   remarks: string;
 }
 
@@ -20,19 +48,34 @@ export const EMPTY_MONEY: MoneyHeader = {
   round_off: "",
   paid_amount: "",
   payment_account_id: null,
+  payments: [],
   remarks: "",
 };
 
 /** Strip the blanks so the API sees "not supplied" rather than "zero". */
 export function moneyPayload(m: MoneyHeader) {
+  const splits = usableSplits(m.payments);
   return {
     price_mode: m.price_mode,
     discount_pct: m.discount_pct || "0",
     discount_amount: m.discount_amount || undefined,
     card_charges: m.card_charges || "0",
     round_off: m.round_off ? m.round_off : undefined,   // blank/null => auto
-    paid_amount: m.paid_amount || "0",
-    payment_account_id: m.paid_amount ? m.payment_account_id ?? undefined : undefined,
+    // With tenders, paid_amount is the server's business — sending both risks
+    // them disagreeing, which it rejects outright.
+    ...(splits.length
+      ? {
+          payments: splits.map((p) => ({
+            account_id: p.account_id,
+            payment_type_id: p.payment_type_id ?? undefined,
+            amount: p.amount,
+            reference: p.reference || undefined,
+          })),
+        }
+      : {
+          paid_amount: m.paid_amount || "0",
+          payment_account_id: m.paid_amount ? m.payment_account_id ?? undefined : undefined,
+        }),
     remarks: m.remarks || undefined,
   };
 }

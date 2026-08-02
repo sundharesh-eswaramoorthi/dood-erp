@@ -1,15 +1,29 @@
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutline";
 import {
   Box,
+  Button,
   Divider,
+  IconButton,
   MenuItem,
   Stack,
   TextField,
   Typography,
 } from "@mui/material";
 
-import { type MoneyHeader, type MoneyTotals } from "./api";
+import {
+  EMPTY_SPLIT,
+  splitTotal,
+  type MoneyHeader,
+  type MoneyTotals,
+  type PaymentSplit,
+} from "./api";
 
 export interface Account {
+  id: number;
+  name: string;
+}
+
+export interface PaymentTypeRef {
   id: number;
   name: string;
 }
@@ -19,11 +33,13 @@ export function MoneyFields({
   value,
   onChange,
   accounts,
+  paymentTypes,
   compact,
 }: {
   value: MoneyHeader;
   onChange: (m: MoneyHeader) => void;
   accounts: Account[];
+  paymentTypes?: PaymentTypeRef[];
   compact?: boolean;
 }) {
   const set = (k: keyof MoneyHeader, v: unknown) => onChange({ ...value, [k]: v });
@@ -76,37 +92,104 @@ export function MoneyFields({
           helperText="blank = auto"
         />
       </Stack>
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={2} flexWrap="wrap" useFlexGap>
-        <TextField
-          size="small"
-          label="Paid now"
-          value={value.paid_amount}
-          onChange={(e) => set("paid_amount", e.target.value)}
-          sx={{ width: w }}
-        />
-        <TextField
-          size="small"
-          label="Payment type"
-          select
-          value={value.payment_account_id ?? ""}
-          onChange={(e) => set("payment_account_id", Number(e.target.value))}
-          sx={{ width: 190 }}
-          disabled={!value.paid_amount}
-          helperText={value.paid_amount ? "required" : "set a paid amount first"}
-        >
-          {accounts.map((a) => (
-            <MenuItem key={a.id} value={a.id}>
-              {a.name}
-            </MenuItem>
-          ))}
-        </TextField>
-        <TextField
-          size="small"
-          label="Remarks"
-          value={value.remarks}
-          onChange={(e) => set("remarks", e.target.value)}
-          sx={{ flex: 1, minWidth: 200 }}
-        />
+      <PaymentSplits
+        value={value.payments}
+        onChange={(payments) => onChange({ ...value, payments })}
+        accounts={accounts}
+        paymentTypes={paymentTypes ?? []}
+      />
+
+      <TextField
+        size="small"
+        label="Remarks"
+        value={value.remarks}
+        onChange={(e) => set("remarks", e.target.value)}
+        fullWidth
+      />
+    </Stack>
+  );
+}
+
+/** v2 §3 split payment: part cash, part UPI, part card is one document, not
+ *  three. Each row says where the money landed AND how it was taken — the same
+ *  bank account can receive a card swipe and a transfer, and the payment-mode
+ *  reports need to tell them apart. */
+export function PaymentSplits({
+  value,
+  onChange,
+  accounts,
+  paymentTypes,
+  label = "Paid now",
+}: {
+  value: PaymentSplit[];
+  onChange: (splits: PaymentSplit[]) => void;
+  accounts: Account[];
+  paymentTypes: PaymentTypeRef[];
+  label?: string;
+}) {
+  const patch = (i: number, changes: Partial<PaymentSplit>) =>
+    onChange(value.map((p, idx) => (idx === i ? { ...p, ...changes } : p)));
+
+  const add = () =>
+    onChange([
+      ...value,
+      { ...EMPTY_SPLIT, account_id: accounts[0]?.id ?? null },
+    ]);
+
+  const total = splitTotal(value);
+
+  if (value.length === 0) {
+    return (
+      <Box>
+        <Button size="small" onClick={add} disabled={!accounts.length}>
+          + {label}
+        </Button>
+        <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+          leave empty for a fully unpaid document
+        </Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Stack spacing={1}>
+      {value.map((p, i) => (
+        <Stack key={i} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="center">
+          <TextField
+            size="small" label="Into account" select value={p.account_id ?? ""}
+            onChange={(e) => patch(i, { account_id: Number(e.target.value) })}
+            sx={{ minWidth: 160 }}
+          >
+            {accounts.map((a) => (<MenuItem key={a.id} value={a.id}>{a.name}</MenuItem>))}
+          </TextField>
+          <TextField
+            size="small" label="Taken as" select value={p.payment_type_id ?? ""}
+            onChange={(e) => patch(i, { payment_type_id: Number(e.target.value) })}
+            sx={{ minWidth: 140 }}
+          >
+            {paymentTypes.map((t) => (<MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>))}
+          </TextField>
+          <TextField
+            size="small" label="Amount" value={p.amount}
+            onChange={(e) => patch(i, { amount: e.target.value })}
+            sx={{ width: 110 }}
+          />
+          <TextField
+            size="small" label="Reference" placeholder="cheque / UPI no"
+            value={p.reference}
+            onChange={(e) => patch(i, { reference: e.target.value })}
+            sx={{ width: 150 }}
+          />
+          <IconButton size="small" onClick={() => onChange(value.filter((_, idx) => idx !== i))}>
+            <DeleteOutlineIcon fontSize="small" />
+          </IconButton>
+        </Stack>
+      ))}
+      <Stack direction="row" spacing={2} alignItems="center">
+        <Button size="small" onClick={add}>+ Add payment</Button>
+        <Typography variant="caption" color="text.secondary">
+          {label} ₹{total.toFixed(2)} across {value.length} tender{value.length === 1 ? "" : "s"}
+        </Typography>
       </Stack>
     </Stack>
   );
