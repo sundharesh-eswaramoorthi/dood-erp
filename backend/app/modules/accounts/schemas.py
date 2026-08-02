@@ -6,6 +6,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.modules.shared import PaymentSplitIn
+from app.services.money import q2
 
 
 class AccountCreate(BaseModel):
@@ -61,7 +62,10 @@ class VoucherCreate(BaseModel):
                 raise ValueError(
                     f"the payment split adds up to {total}, but amount says {self.amount}"
                 )
-            object.__setattr__(self, "amount", total)
+            # to the paisa, like every other money field — a bare sum of two
+            # tenders carries no scale and the voucher answered "1000" where
+            # the same figure elsewhere reads "1000.00"
+            object.__setattr__(self, "amount", q2(total))
             object.__setattr__(self, "account_id", self.payments[0].account_id)
             if self.payment_type_id is None:
                 object.__setattr__(self, "payment_type_id", self.payments[0].payment_type_id)

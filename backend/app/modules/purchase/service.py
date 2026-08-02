@@ -67,6 +67,7 @@ async def post_bill(session: AsyncSession, principal: Principal, data: PurchaseB
     if supplier is None:
         raise ValueError("supplier not found")
 
+    await doc_money.validate_header_godown(session, branch_id, data.godown_id)
     bill_date = data.bill_date or dt.date.today()
     computed = money.compute(
         await _money_inputs(session, data.lines),
@@ -183,6 +184,7 @@ async def post_return(session: AsyncSession, principal: Principal, data: Purchas
     if supplier is None:
         raise ValueError("supplier not found")
 
+    await doc_money.validate_header_godown(session, branch_id, data.godown_id)
     rdate = data.return_date or dt.date.today()
     computed = money.compute(
         await _money_inputs(session, data.lines),
@@ -288,6 +290,9 @@ async def create_po(session: AsyncSession, principal: Principal, data: PurchaseO
     branch_id = data.branch_id or (principal.branch_ids[0] if principal.branch_ids else None)
     if branch_id is None or branch_id not in principal.branch_ids:
         raise PermissionError("Branch not permitted")
+    # A PO's header godown is read back at receive time and becomes the bill's
+    # default, so an unchecked one here fails much later against the bill.
+    await doc_money.validate_header_godown(session, branch_id, data.godown_id)
 
     # A PO moves no stock, but it is priced exactly like the bill it becomes.
     computed = money.compute(

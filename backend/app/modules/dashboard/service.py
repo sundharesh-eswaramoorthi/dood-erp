@@ -70,14 +70,27 @@ async def get_dashboard(session: AsyncSession, principal: Principal, branch_id: 
     recent = [json.loads(a) for a in raw_activity]
 
     data = {
-        "today_sales": today_sales, "today_purchase": today_purchase, "today_orders": today_orders,
-        "pending_deliveries": pending_deliveries, "today_collection": today_collection,
-        "today_expenses": today_expenses, "current_stock_value": stock_value,
-        "outstanding_receivable": receivable, "outstanding_payable": payable, "petty_cash": petty_cash,
-        "low_stock": [dict(r) for r in low_stock],
-        "top_selling": [dict(r) for r in top_selling],
+        # Money and quantities go out as decimal STRINGS, like every other
+        # endpoint. This is not cosmetic: the cache round-trips through
+        # json.dumps(default=str), so a Decimal came back as "0" from Redis but
+        # as 0.0 from the live path — the SAME field changed type when the 30s
+        # TTL lapsed, which is as intermittent as a bug gets.
+        "today_sales": str(today_sales), "today_purchase": str(today_purchase),
+        "today_orders": today_orders,
+        "pending_deliveries": pending_deliveries,
+        "today_collection": str(today_collection), "today_expenses": str(today_expenses),
+        "current_stock_value": str(stock_value),
+        "outstanding_receivable": str(receivable), "outstanding_payable": str(payable),
+        "petty_cash": str(petty_cash),
+        "low_stock": [
+            {**dict(r), "on_hand": str(r["on_hand"]), "min_qty": str(r["min_qty"])}
+            for r in low_stock
+        ],
+        "top_selling": [{**dict(r), "qty": str(r["qty"])} for r in top_selling],
         "recent_activities": recent,
         "cached": False,
     }
-    await redis_client.set(key, json.dumps(data, default=str), ex=_TTL)
+    # every value is now JSON-native, so the cached copy is byte-identical to
+    # the live one rather than merely similar
+    await redis_client.set(key, json.dumps(data), ex=_TTL)
     return data

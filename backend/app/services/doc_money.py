@@ -34,6 +34,22 @@ async def resolve_godown(
     return godown_id
 
 
+async def validate_header_godown(
+    session: AsyncSession, branch_id: int, header_godown: int | None
+) -> None:
+    """Check the document's DEFAULT godown, which is stored on the header.
+
+    resolve_godown only ever sees it when a line falls back to it, so a header
+    godown belonging to another branch was accepted and written down whenever
+    every line named its own. It does not stay harmless: a purchase order's
+    header godown is read back at receive time and becomes the bill's default,
+    so the refusal arrived against the bill instead of the order that was
+    actually wrong.
+    """
+    if header_godown is not None:
+        await resolve_godown(session, branch_id, None, header_godown)
+
+
 async def product_hsn(session: AsyncSession, product_id: int) -> str | None:
     return (
         await session.execute(text("SELECT hsn_code FROM product WHERE id=:p"), {"p": product_id})

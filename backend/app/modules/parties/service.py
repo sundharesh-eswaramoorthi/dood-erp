@@ -253,6 +253,10 @@ async def update_party(
 
     await emit(session, principal.org_id, "party.updated",
                {"party_id": party.id, "fields": sorted(fields), "by": principal.user_id})
+    # Re-read so the answer is the stored row, not the caller's input echoed
+    # back — setattr leaves the ORM object holding whatever was sent, which
+    # hides column scale and any normalisation done on the way in.
+    await session.refresh(party)
     return party
 
 

@@ -204,4 +204,14 @@ def compute(
         raise MoneyError(f"paid amount {t.paid_amount} exceeds invoice total {t.grand_total}")
     t.balance_amount = q2(t.grand_total - t.paid_amount)
 
+    # Every money field leaves at the same scale. The zero paths skipped q2 —
+    # an intra-state line carried igst as a bare ZERO and a line with no header
+    # discount carried the allocation the same way — so one response could show
+    # cgst "7.50" beside igst "0", and totals.igst_total "0.00" beside the
+    # line's "0". The screens render these strings directly.
+    for out in outs:
+        for field in ("gross", "discount", "header_discount_alloc", "taxable",
+                      "cgst", "sgst", "igst", "tax", "line_total"):
+            setattr(out, field, q2(getattr(out, field)))
+
     return Computed(lines=outs, totals=t)

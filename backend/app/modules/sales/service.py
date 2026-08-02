@@ -714,6 +714,7 @@ async def post_sales_return(session: AsyncSession, principal: Principal, data: S
     if customer is None:
         raise ValueError("customer not found")
 
+    await doc_money.validate_header_godown(session, branch, data.godown_id)
     rdate = data.return_date or dt.date.today()
     money_lines = []
     for line in data.lines:

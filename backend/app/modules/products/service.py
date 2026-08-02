@@ -322,4 +322,10 @@ async def update_product(
     await _sync_sub_unit(session, principal, product)
     if min_stock is not None:
         await _set_min_stock(session, principal, product.id, min_stock)
+
+    # Re-read before answering. setattr leaves the ORM object holding the
+    # CALLER's value, so the response echoed the input rather than what was
+    # stored: PUT sale_price "275" came back "275" while GET said "275.0000".
+    # The edit form and the list then disagreed about the same field.
+    await session.refresh(product)
     return product

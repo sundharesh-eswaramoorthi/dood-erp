@@ -75,7 +75,11 @@ class MoneyHeaderIn(BaseModel):
             raise ValueError(
                 f"the payment split adds up to {total}, but paid_amount says {self.paid_amount}"
             )
-        object.__setattr__(self, "paid_amount", total)
+        # to the paisa, like the engine downstream — the raw sum of the tenders
+        # carries no scale of its own
+        from app.services.money import q2
+
+        object.__setattr__(self, "paid_amount", q2(total))
         return self
 
     def settlement(self) -> list[PaymentSplitIn]:
