@@ -438,3 +438,51 @@ async def reconcile(session: AsyncSession, principal: Principal) -> dict:
         "drift_rows": [dict(d) for d in drift],
         "allocation_drift": [dict(d) for d in alloc_drift],
     }
+
+
+# A transfer is OPEN while it still needs somebody to act: a draft waiting to
+# be dispatched, or goods in transit waiting to be received. It is CLOSED once
+# it has landed or been abandoned.
+OPEN_TRANSFER_STATUSES = ("draft", "dispatched")
+CLOSED_TRANSFER_STATUSES = ("received", "cancelled")
+
+
+async def list_transfers(
+    session: AsyncSession,
+    principal: Principal,
+    state: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    """Transfers with their line count and quantity.
+
+    There was no list at all: a transfer existed only in the screen that
+    created it, so a draft left behind by a page refresh could never be found
+    again, let alone dispatched.
+    """
+    where = ["TRUE"]
+    params: dict = {"l": min(limit, 500)}
+    if state == "open":
+        where.append("t.status = ANY(:st)")
+        params["st"] = list(OPEN_TRANSFER_STATUSES)
+    elif state == "closed":
+        where.append("t.status = ANY(:st)")
+        params["st"] = list(CLOSED_TRANSFER_STATUSES)
+
+    rows = (
+        await session.execute(
+            text(
+                "SELECT t.id, t.doc_no, t.status, t.from_branch_id, t.from_godown_id, "
+                "       t.to_branch_id, t.to_godown_id, t.dispatch_date, t.receive_date, "
+                "       t.created_at, "
+                "       COALESCE(l.lines, 0) AS line_count, COALESCE(l.qty, 0) AS total_qty "
+                "FROM stock_transfer t "
+                "LEFT JOIN (SELECT transfer_id, COUNT(*) AS lines, SUM(base_qty) AS qty "
+                "           FROM stock_transfer_line GROUP BY transfer_id) l "
+                "  ON l.transfer_id = t.id "
+                f"WHERE {' AND '.join(where)} "
+                "ORDER BY t.id DESC LIMIT :l"
+            ),
+            params,
+        )
+    ).mappings().all()
+    return [{**dict(r), "total_qty": str(r["total_qty"])} for r in rows]

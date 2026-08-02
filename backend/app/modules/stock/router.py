@@ -106,6 +106,15 @@ async def set_reorder(
 
 
 # ---- transfers ----
+@router.get("/transfers")
+async def list_transfers(
+    state: str | None = None,     # "open" | "closed" | None for everything
+    principal: Principal = Depends(require_permission("stock.read")),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_transfers(session, principal, state)
+
+
 @router.post("/transfers", response_model=TransferOut, status_code=status.HTTP_201_CREATED)
 async def transfer_create(
     payload: TransferCreate,

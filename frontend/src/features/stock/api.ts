@@ -155,3 +155,28 @@ export async function postVerification(id: number): Promise<Verification> {
   const { data } = await api.post<Verification>(`/api/v1/stock/verifications/${id}/post`);
   return data;
 }
+
+/** A transfer as it appears in the list (V2.17): header plus its size. */
+export interface TransferRow {
+  id: number;
+  doc_no: string | null;
+  status: string;
+  from_branch_id: number;
+  from_godown_id: number;
+  to_branch_id: number;
+  to_godown_id: number;
+  dispatch_date: string | null;
+  receive_date: string | null;
+  created_at: string;
+  line_count: number;
+  total_qty: string;
+}
+
+/** `state` is "open" (draft or in transit — someone still has to act) or
+ *  "closed" (received or cancelled). */
+export async function listTransfers(state?: "open" | "closed"): Promise<TransferRow[]> {
+  const { data } = await api.get<TransferRow[]>("/api/v1/stock/transfers", {
+    params: state ? { state } : undefined,
+  });
+  return data;
+}
