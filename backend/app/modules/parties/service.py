@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 from decimal import Decimal
 
 from sqlalchemy import select, text
@@ -130,7 +131,6 @@ async def create_party(
         party_code=code,
         name=data.name,
         area=data.area.strip(),
-        party_type=data.party_type,
         gstin=data.gstin,
         phone=data.phone,
         pan=data.pan,
@@ -143,6 +143,16 @@ async def create_party(
     )
     session.add(party)
     await session.flush()
+
+    # Same transaction as the party itself: a party that exists without the
+    # address the operator just typed is worse than no party at all.
+    if data.address is not None:
+        await add_address(session, principal, party.id, data.address)
+    for i, contact in enumerate(data.contacts):
+        # first contact is the primary one unless the caller says otherwise
+        if i == 0 and not any(c.is_primary for c in data.contacts):
+            contact = contact.model_copy(update={"is_primary": True})
+        await add_contact(session, principal, party.id, contact)
 
     await _post_opening(
         session, principal, party,
@@ -189,7 +199,7 @@ async def update_party(
     # gstin/phone/pan/credit_limit are nullable — an explicit null clears them.
     # These are NOT NULL, so a null means "leave alone", not "wipe".
     non_nullable = {
-        "name", "area", "party_type", "is_active",
+        "name", "area", "is_active",
         "opening_balance", "opening_balance_side", "serving_branch_id",
     }
     for key, value in fields.items():
@@ -238,7 +248,6 @@ async def list_parties(
     principal: Principal,
     q: str | None = None,
     *,
-    party_type: str | None = None,
     area: str | None = None,
     is_active: bool | None = None,
     serving_branch_id: int | None = None,
@@ -257,9 +266,6 @@ async def list_parties(
             "(p.name ILIKE :q OR p.party_code ILIKE :q OR p.phone ILIKE :q OR p.area ILIKE :q)"
         )
         params["q"] = f"%{q}%"
-    if party_type:
-        where.append("p.party_type = :pt")
-        params["pt"] = party_type
     if area:
         where.append("lower(p.area) = lower(:area)")
         params["area"] = area
@@ -282,7 +288,7 @@ async def list_parties(
     rows = (
         await session.execute(
             text(
-                "SELECT p.id, p.party_code, p.name, p.area, p.party_type, p.gstin, p.phone, "
+                "SELECT p.id, p.party_code, p.name, p.area, p.gstin, p.phone, "
                 "       p.pan, p.credit_limit, p.opening_balance, p.opening_balance_side, "
                 "       p.opening_as_of, p.is_active, p.serving_branch_id, "
                 "       COALESCE(pb.net_balance, 0) AS net_balance, "
@@ -342,15 +348,41 @@ async def add_address(
     session: AsyncSession, principal: Principal, party_id: int, data: AddressCreate
 ) -> PartyAddress:
     party = await _require_party(session, party_id)
+    lat, lng = _geo_from_link(data)
     row = PartyAddress(
         org_id=principal.org_id, branch_id=party.serving_branch_id, party_id=party.id,
         label=data.label, line1=data.line1, line2=data.line2, city=data.city,
-        state=data.state, pincode=data.pincode, lat=data.lat, lng=data.lng,
-        place_id=data.place_id, is_default=data.is_default,
+        state=data.state, pincode=data.pincode, lat=lat, lng=lng,
+        place_id=data.place_id, is_default=data.is_default, map_link=data.map_link,
     )
     session.add(row)
     await session.flush()
     return row
+
+
+# A Google Maps URL carries the coordinates in one of a few shapes:
+#   .../@11.3410,77.7172,15z    ?q=11.3410,77.7172    !3d11.3410!4d77.7172
+_GEO_PATTERNS = (
+    re.compile(r"@(-?\d+\.\d+),(-?\d+\.\d+)"),
+    re.compile(r"[?&]q=(-?\d+\.\d+),\s*(-?\d+\.\d+)"),
+    re.compile(r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)"),
+)
+
+
+def _geo_from_link(data: AddressCreate) -> tuple[Decimal | None, Decimal | None]:
+    """The address's coordinates, read out of the pasted link if not typed in.
+
+    Short links (maps.app.goo.gl/...) hold no coordinates until they are
+    followed, which would mean an outbound request while posting a party — so
+    those simply keep the link and no coordinates.
+    """
+    if data.lat is not None or data.lng is not None or not data.map_link:
+        return data.lat, data.lng
+    for pattern in _GEO_PATTERNS:
+        m = pattern.search(data.map_link)
+        if m:
+            return Decimal(m.group(1)), Decimal(m.group(2))
+    return None, None
 
 
 async def list_gst(session: AsyncSession, party_id: int) -> list[PartyGstRegistration]:
@@ -503,7 +535,6 @@ async def get_party_detail(session: AsyncSession, party_id: int) -> dict:
         "party_code": party.party_code,
         "name": party.name,
         "area": party.area,
-        "party_type": party.party_type,
         "gstin": party.gstin,
         "phone": party.phone,
         "pan": party.pan,

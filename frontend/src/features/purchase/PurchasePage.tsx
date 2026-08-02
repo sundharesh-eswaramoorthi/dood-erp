@@ -62,7 +62,7 @@ const EMPTY_LINE: DraftLine = {
 export function PurchasePage() {
   const qc = useQueryClient();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
+  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
   const bills = useQuery({ queryKey: ["purchase-bills"], queryFn: listBills });

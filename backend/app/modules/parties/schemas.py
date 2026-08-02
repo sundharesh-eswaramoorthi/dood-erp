@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field
 class PartyCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     area: str = Field(min_length=1, max_length=120)          # v2 §1: required
-    party_type: str = Field(default="customer", pattern="^(customer|supplier|both)$")
     gstin: str | None = Field(default=None, max_length=20)
     phone: str | None = Field(default=None, max_length=20)
     pan: str | None = Field(default=None, max_length=20)
@@ -19,6 +18,12 @@ class PartyCreate(BaseModel):
     opening_as_of: dt.date | None = None
     is_active: bool = True
     serving_branch_id: int | None = None
+
+    # v2 §1 wants the address and the first contact on the "Add party" form.
+    # They post with the party so a half-entered party can't survive a failure
+    # part-way through, and so the caller makes one round trip, not three.
+    address: "AddressCreate | None" = None
+    contacts: "list[ContactCreate]" = []
 
 
 class PartyUpdate(BaseModel):
@@ -30,7 +35,6 @@ class PartyUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     area: str | None = Field(default=None, min_length=1, max_length=120)
-    party_type: str | None = Field(default=None, pattern="^(customer|supplier|both)$")
     gstin: str | None = Field(default=None, max_length=20)
     phone: str | None = Field(default=None, max_length=20)
     pan: str | None = Field(default=None, max_length=20)
@@ -49,7 +53,6 @@ class PartyOut(BaseModel):
     party_code: str
     name: str
     area: str
-    party_type: str
     gstin: str | None
     phone: str | None
     pan: str | None
@@ -102,6 +105,7 @@ class AddressCreate(BaseModel):
     lat: Decimal | None = None
     lng: Decimal | None = None
     place_id: str | None = Field(default=None, max_length=200)
+    map_link: str | None = Field(default=None, max_length=500)   # v2 §1
     is_default: bool = False
 
 
@@ -118,6 +122,7 @@ class AddressOut(BaseModel):
     lat: Decimal | None
     lng: Decimal | None
     place_id: str | None
+    map_link: str | None
     is_default: bool
 
 
@@ -209,3 +214,8 @@ class PartyLedgerOut(BaseModel):
     receivable: Decimal
     payable: Decimal
     entries: list[LedgerEntryOut]
+
+
+# PartyCreate names AddressCreate/ContactCreate before either is defined, so the
+# annotations stay strings until the module has finished loading.
+PartyCreate.model_rebuild()

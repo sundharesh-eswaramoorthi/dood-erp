@@ -27,6 +27,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 
+import { errorMessage } from "../../lib/api";
 import { listBranches } from "../users/api";
 import {
   createParty,
@@ -42,12 +43,22 @@ import {
 const EMPTY = {
   name: "",
   area: "",
-  party_type: "customer",
   phone: "",
   gstin: "",
   credit_limit: "",
   opening_balance: "",
   opening_balance_side: "receivable",
+  // v2 §1 address block — posts with the party, not after it
+  line1: "",
+  line2: "",
+  city: "",
+  state: "",
+  pincode: "",
+  map_link: "",
+  // v2 §1 first contact
+  contact_name: "",
+  contact_phone: "",
+  contact_relationship: "",
 };
 
 const SORTS = [
@@ -91,12 +102,30 @@ export function PartiesPage() {
       createParty({
         name: form.name,
         area: form.area,
-        party_type: form.party_type,
         phone: form.phone || null,
         gstin: form.gstin || null,
         credit_limit: form.credit_limit || null,
         opening_balance: form.opening_balance || "0",
         opening_balance_side: form.opening_balance_side,
+        // only send the blocks the operator actually filled in
+        address: form.line1
+          ? {
+              line1: form.line1,
+              line2: form.line2 || undefined,
+              city: form.city || undefined,
+              state: form.state || undefined,
+              pincode: form.pincode || undefined,
+              map_link: form.map_link || undefined,
+              is_default: true,
+            }
+          : undefined,
+        contacts: form.contact_name
+          ? [{
+              name: form.contact_name,
+              phone: form.contact_phone || undefined,
+              relationship: form.contact_relationship || undefined,
+            }]
+          : undefined,
       }),
     onSuccess: () => {
       setForm(EMPTY);
@@ -156,17 +185,6 @@ export function PartiesPage() {
                   sx={{ flex: 1 }}
                 />
                 <TextField
-                  label="Type"
-                  select
-                  value={form.party_type}
-                  onChange={(e) => setForm({ ...form, party_type: e.target.value })}
-                  sx={{ flex: 1, minWidth: 130 }}
-                >
-                  <MenuItem value="customer">Customer</MenuItem>
-                  <MenuItem value="supplier">Supplier</MenuItem>
-                  <MenuItem value="both">Both</MenuItem>
-                </TextField>
-                <TextField
                   label="Phone"
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
@@ -203,6 +221,74 @@ export function PartiesPage() {
                   <MenuItem value="receivable">Receivable</MenuItem>
                   <MenuItem value="payable">Payable</MenuItem>
                 </TextField>
+              </Stack>
+
+              <Divider textAlign="left">
+                <Typography variant="caption" color="text.secondary">
+                  Address &amp; contact — optional, saved with the party
+                </Typography>
+              </Divider>
+
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Address line 1"
+                  value={form.line1}
+                  onChange={(e) => setForm({ ...form, line1: e.target.value })}
+                  sx={{ flex: 2 }}
+                />
+                <TextField
+                  label="Line 2"
+                  value={form.line2}
+                  onChange={(e) => setForm({ ...form, line2: e.target.value })}
+                  sx={{ flex: 2 }}
+                />
+                <TextField
+                  label="City"
+                  value={form.city}
+                  onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  label="State"
+                  value={form.state}
+                  onChange={(e) => setForm({ ...form, state: e.target.value })}
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  label="Pincode"
+                  value={form.pincode}
+                  onChange={(e) => setForm({ ...form, pincode: e.target.value })}
+                  sx={{ width: 120 }}
+                />
+              </Stack>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+                <TextField
+                  label="Map link"
+                  placeholder="paste a Google Maps link"
+                  value={form.map_link}
+                  onChange={(e) => setForm({ ...form, map_link: e.target.value })}
+                  helperText="coordinates are read out of the link automatically"
+                  sx={{ flex: 2 }}
+                />
+                <TextField
+                  label="Contact name"
+                  value={form.contact_name}
+                  onChange={(e) => setForm({ ...form, contact_name: e.target.value })}
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  label="Contact phone"
+                  value={form.contact_phone}
+                  onChange={(e) => setForm({ ...form, contact_phone: e.target.value })}
+                  sx={{ flex: 1 }}
+                />
+                <TextField
+                  label="Relationship"
+                  placeholder="Owner, Manager…"
+                  value={form.contact_relationship}
+                  onChange={(e) => setForm({ ...form, contact_relationship: e.target.value })}
+                  sx={{ flex: 1 }}
+                />
                 <Button
                   type="submit"
                   variant="contained"
@@ -217,7 +303,7 @@ export function PartiesPage() {
           </Box>
           {create.isError && (
             <Alert severity="error" sx={{ mt: 2 }}>
-              Could not create party — name and area are required.
+              {errorMessage(create.error, "Could not create the party")}
             </Alert>
           )}
         </CardContent>
@@ -256,19 +342,6 @@ export function PartiesPage() {
                   {a}
                 </MenuItem>
               ))}
-            </TextField>
-            <TextField
-              size="small"
-              label="Type"
-              select
-              value={filters.party_type ?? ""}
-              onChange={(e) => patch("party_type", e.target.value)}
-              sx={{ minWidth: 130 }}
-            >
-              <MenuItem value="">All types</MenuItem>
-              <MenuItem value="customer">Customer</MenuItem>
-              <MenuItem value="supplier">Supplier</MenuItem>
-              <MenuItem value="both">Both</MenuItem>
             </TextField>
             <TextField
               size="small"
@@ -315,7 +388,6 @@ export function PartiesPage() {
                   <TableCell>Code</TableCell>
                   <TableCell>Name</TableCell>
                   <TableCell>Area</TableCell>
-                  <TableCell>Type</TableCell>
                   <TableCell>Phone</TableCell>
                   <TableCell align="right">Outstanding</TableCell>
                   <TableCell>Status</TableCell>
@@ -336,9 +408,6 @@ export function PartiesPage() {
                         </MuiLink>
                       </TableCell>
                       <TableCell>{p.area || "—"}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={p.party_type} />
-                      </TableCell>
                       <TableCell>{p.phone || "—"}</TableCell>
                       <TableCell align="right">
                         <Typography
@@ -439,7 +508,6 @@ function EditDialog({
     setDraft({
       name: party.name,
       area: party.area,
-      party_type: party.party_type,
       phone: party.phone ?? "",
       gstin: party.gstin ?? "",
       pan: party.pan ?? "",
@@ -473,17 +541,6 @@ function EditDialog({
             />
           </Stack>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-            <TextField
-              label="Type"
-              select
-              value={draft.party_type ?? "customer"}
-              onChange={(e) => set("party_type", e.target.value)}
-              fullWidth
-            >
-              <MenuItem value="customer">Customer</MenuItem>
-              <MenuItem value="supplier">Supplier</MenuItem>
-              <MenuItem value="both">Both</MenuItem>
-            </TextField>
             <TextField
               label="Serving branch"
               select

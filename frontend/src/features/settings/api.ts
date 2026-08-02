@@ -142,3 +142,30 @@ export async function updateDocumentType(
   const { data } = await api.put<DocumentType>(`/api/v1/document-types/${id}`, payload);
   return data;
 }
+
+// ---- document numbering (v2 §9) ----
+export interface NumberingSeries {
+  id: number;
+  doc_type: string;
+  label: string;
+  fin_year: string;
+  prefix: string;
+  pad_width: number;
+  next_value: number;
+  branch_id: number | null;
+  /** what the next allocated number will look like */
+  sample: string;
+}
+
+export async function listNumbering(): Promise<NumberingSeries[]> {
+  const { data } = await api.get<NumberingSeries[]>("/api/v1/numbering-series");
+  return data;
+}
+
+export async function updateNumbering(
+  id: number,
+  payload: { prefix?: string; pad_width?: number; next_value?: number },
+): Promise<NumberingSeries> {
+  const { data } = await api.put<NumberingSeries>(`/api/v1/numbering-series/${id}`, payload);
+  return data;
+}

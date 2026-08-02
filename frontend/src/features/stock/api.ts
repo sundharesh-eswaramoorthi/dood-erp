@@ -46,8 +46,10 @@ export interface AdjustmentCreate {
   lines: AdjustmentLineIn[];
 }
 
-export async function listGodowns(): Promise<Godown[]> {
-  const { data } = await api.get<Godown[]>("/api/v1/godowns");
+export async function listGodowns(allBranches = false): Promise<Godown[]> {
+  const { data } = await api.get<Godown[]>("/api/v1/godowns", {
+    params: allBranches ? { all_branches: true } : undefined,
+  });
   return data;
 }
 

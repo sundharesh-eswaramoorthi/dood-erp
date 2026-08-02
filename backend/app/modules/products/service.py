@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import Principal
 from app.models.product import Product, ProductCategory, UnitConversion, UnitOfMeasure
 from app.modules.products.schemas import CategoryCreate, ProductCreate, ProductUpdate
+from app.services.numbering import allocate
 
 
 # ---- categories ----
@@ -121,9 +122,15 @@ async def create_product(
     if unit is None:
         raise ValueError("base_unit_id does not exist")
 
+    # v2 §2: the code is optional. Blank means "number it for me" — the same
+    # gap-free allocator the party code uses, so the two behave alike.
+    code = (data.code or "").strip()
+    if not code:
+        code = await allocate(session, principal.org_id, None, "product")
+
     product = Product(
         org_id=principal.org_id,
-        code=data.code,
+        code=code,
         name=data.name,
         category_id=data.category_id,
         base_unit_id=data.base_unit_id,
@@ -140,6 +147,7 @@ async def create_product(
         opening_rate=data.opening_rate,
         opening_as_of=data.opening_as_of,
         opening_godown_id=data.opening_godown_id,
+        opening_branch_id=data.opening_branch_id,
         is_active=data.is_active,
         created_by=principal.user_id,
     )
@@ -147,7 +155,7 @@ async def create_product(
     try:
         await session.flush()
     except IntegrityError as e:
-        raise ValueError(f"Product code '{data.code}' already exists") from e
+        raise ValueError(f"Product code '{code}' already exists") from e
 
     for conv in data.conversions:
         if conv.from_unit_id == data.base_unit_id:
@@ -217,6 +225,7 @@ async def _post_opening_stock(
     from app.modules.stock.schemas import AdjustmentCreate, AdjustmentLineIn
 
     godown_id = data.opening_godown_id
+    branch_id = data.opening_branch_id
     if godown_id is None:
         godown_id = (
             await session.execute(
@@ -224,17 +233,28 @@ async def _post_opening_stock(
                     "SELECT id FROM godown WHERE org_id=:o AND branch_id = ANY(:b) AND is_active "
                     "ORDER BY id LIMIT 1"
                 ),
-                {"o": principal.org_id, "b": principal.branch_ids or [-1]},
+                {"o": principal.org_id, "b": [branch_id] if branch_id else (principal.branch_ids or [-1])},
             )
         ).scalar_one_or_none()
     if godown_id is None:
         raise ValueError("opening stock needs a godown")
+    if branch_id is None:
+        # Fall back to the godown's OWN branch, not the caller's first branch:
+        # stock_balance is keyed on (branch, godown), so guessing the branch
+        # files the opening under a pair that does not exist.
+        branch_id = (
+            await session.execute(
+                text("SELECT branch_id FROM godown WHERE id=:g"), {"g": godown_id}
+            )
+        ).scalar_one_or_none()
+        product.opening_branch_id = branch_id
 
     await stock_service.post_adjustment(
         session,
         principal,
         AdjustmentCreate(
             godown_id=godown_id,
+            branch_id=branch_id,
             adj_reason="opening",
             effective_date=data.opening_as_of or dt.date.today(),
             note=f"Opening stock for {product.code}",

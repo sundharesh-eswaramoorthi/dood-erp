@@ -343,3 +343,91 @@ async def feature_flags(session: AsyncSession, principal: Principal) -> dict:
         for r in rows
         if r.key.startswith("feature.")
     }
+
+
+# ---- document numbering (v2 §9) ----
+# Friendly names for the doc_types the allocator uses, so the settings screen
+# reads as documents rather than as table keys.
+NUMBERING_LABELS = {
+    "party": "Party code",
+    "product": "Product code",
+    "purchase_order": "Purchase order",
+    "purchase_bill": "Purchase bill",
+    "purchase_return": "Purchase return / debit note",
+    "sale_order": "Sale order",
+    "sales_bill": "Sales invoice",
+    "sales_return": "Sales return / credit note",
+    "delivery": "Delivery note",
+    "payment_voucher": "Payment voucher",
+    "expense": "Expense",
+    "journal": "Journal voucher",
+    "stock_adjustment": "Stock adjustment",
+    "stock_transfer": "Stock transfer",
+    "stock_verification": "Stock verification",
+}
+
+
+def _sample(prefix: str, pad_width: int, next_value: int) -> str:
+    return f"{prefix}{str(next_value).zfill(pad_width)}"
+
+
+async def list_numbering(session: AsyncSession, principal: Principal) -> list[dict]:
+    rows = (
+        await session.execute(
+            text(
+                "SELECT id, doc_type, fin_year, prefix, pad_width, next_value, branch_id "
+                "FROM numbering_series WHERE org_id = :o ORDER BY fin_year DESC, doc_type"
+            ),
+            {"o": principal.org_id},
+        )
+    ).mappings().all()
+    return [
+        {**dict(r), "sample": _sample(r["prefix"], r["pad_width"], r["next_value"]),
+         "label": NUMBERING_LABELS.get(r["doc_type"], r["doc_type"].replace("_", " ").title())}
+        for r in rows
+    ]
+
+
+async def update_numbering(
+    session: AsyncSession, principal: Principal, series_id: int, data
+) -> dict:
+    row = (
+        await session.execute(
+            text(
+                "SELECT id, doc_type, fin_year, prefix, pad_width, next_value, branch_id "
+                "FROM numbering_series WHERE org_id = :o AND id = :i FOR UPDATE"
+            ),
+            {"o": principal.org_id, "i": series_id},
+        )
+    ).mappings().first()
+    if row is None:
+        raise LookupError("Numbering series not found")
+
+    fields = data.model_dump(exclude_unset=True)
+    prefix = fields.get("prefix", row["prefix"])
+    pad_width = fields.get("pad_width", row["pad_width"])
+    next_value = fields.get("next_value", row["next_value"])
+
+    # The counter only ever moves forward. Winding it back would re-issue
+    # numbers that are already printed on documents, and the ledgers' unique
+    # keys would start rejecting posts halfway through a day's work.
+    if next_value < row["next_value"]:
+        raise ValueError(
+            f"The next number can only move forward — it is already at {row['next_value']}"
+        )
+
+    # Changing a prefix mid-series is allowed (a business may rebrand) but it
+    # does NOT renumber what is already issued, so say so rather than implying
+    # the whole series changed.
+    await session.execute(
+        text(
+            "UPDATE numbering_series SET prefix = :p, pad_width = :w, next_value = :n "
+            "WHERE org_id = :o AND id = :i"
+        ),
+        {"p": prefix, "w": pad_width, "n": next_value, "o": principal.org_id, "i": series_id},
+    )
+    return {
+        **dict(row), "prefix": prefix, "pad_width": pad_width, "next_value": next_value,
+        "sample": _sample(prefix, pad_width, next_value),
+        "label": NUMBERING_LABELS.get(row["doc_type"], row["doc_type"].replace("_", " ").title()),
+    }

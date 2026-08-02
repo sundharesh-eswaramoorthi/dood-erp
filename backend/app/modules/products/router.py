@@ -74,6 +74,10 @@ async def products_create(
 ):
     try:
         return await create_product(session, principal, payload)
+    except PermissionError as e:
+        # opening stock posts a real adjustment, which refuses a branch the
+        # caller has no access to
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
     except ValueError as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 

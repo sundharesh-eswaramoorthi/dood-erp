@@ -53,7 +53,7 @@ const STATUS_COLOR: Record<string, "warning" | "success" | "default"> = {
 export function SalesPage() {
   const qc = useQueryClient();
   const parties = useQuery({ queryKey: ["parties"], queryFn: () => listParties() });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
+  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const orders = useQuery({ queryKey: ["sale-orders"], queryFn: listOrders });
   const bills = useQuery({ queryKey: ["sales-bills"], queryFn: listBills });

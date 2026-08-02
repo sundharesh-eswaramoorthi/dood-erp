@@ -30,7 +30,7 @@ export function StockPage() {
   const qc = useQueryClient();
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
+  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
 
   const [productId, setProductId] = useState<number | "">("");
   const [form, setForm] = useState({ godown_id: "", reason: "opening", qty: "", unit_id: "", cost: "" });

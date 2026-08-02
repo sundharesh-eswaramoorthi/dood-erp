@@ -5,7 +5,6 @@ export interface Party {
   party_code: string;
   name: string;
   area: string;
-  party_type: string;
   gstin: string | null;
   phone: string | null;
   pan: string | null;
@@ -24,10 +23,32 @@ export interface PartyListItem extends Party {
   payable: string;
 }
 
+export interface AddressInput {
+  line1: string;
+  label?: string;
+  line2?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  lat?: string | null;
+  lng?: string | null;
+  /** pasted Google Maps URL; lat/lng are read out of it server-side */
+  map_link?: string | null;
+  is_default?: boolean;
+}
+
+export interface ContactInput {
+  name: string;
+  phone?: string;
+  email?: string;
+  designation?: string;
+  relationship?: string;
+  is_primary?: boolean;
+}
+
 export interface PartyCreate {
   name: string;
   area: string;
-  party_type: string;
   gstin?: string | null;
   phone?: string | null;
   pan?: string | null;
@@ -37,13 +58,16 @@ export interface PartyCreate {
   opening_as_of?: string | null;
   is_active?: boolean;
   serving_branch_id?: number | null;
+  address?: AddressInput | null;
+  contacts?: ContactInput[];
 }
 
-export type PartyUpdate = Partial<PartyCreate>;
+/** Editing a party never posts its address or contacts — those are their own
+ *  sub-resources once the party exists. */
+export type PartyUpdate = Partial<Omit<PartyCreate, "address" | "contacts">>;
 
 export interface PartyFilters {
   q?: string;
-  party_type?: string;
   area?: string;
   is_active?: boolean;
   serving_branch_id?: number;
@@ -74,6 +98,7 @@ export interface Address {
   pincode: string | null;
   lat: string | null;
   lng: string | null;
+  map_link: string | null;
   place_id: string | null;
   is_default: boolean;
 }
@@ -173,6 +198,7 @@ export async function addAddress(
     pincode?: string;
     lat?: string | null;
     lng?: string | null;
+    map_link?: string | null;
   },
 ): Promise<Address> {
   const { data } = await api.post<Address>(`/api/v1/parties/${id}/addresses`, payload);

@@ -122,3 +122,24 @@ class SettingOut(BaseModel):
     key: str
     value: dict
     scope: str
+
+
+# ---- document numbering (v2 §9 "customisable document numbers") ----
+class NumberingSeriesOut(BaseModel):
+    id: int
+    doc_type: str
+    label: str           # human name for doc_type, e.g. "Sales invoice"
+    fin_year: str
+    prefix: str
+    pad_width: int
+    next_value: int
+    branch_id: int | None
+    sample: str          # what the next allocated number will look like
+
+
+class NumberingSeriesUpdate(BaseModel):
+    """next_value moves forward only — see the service for why."""
+
+    prefix: str | None = Field(default=None, max_length=20)
+    pad_width: int | None = Field(default=None, ge=1, le=12)
+    next_value: int | None = Field(default=None, ge=1)

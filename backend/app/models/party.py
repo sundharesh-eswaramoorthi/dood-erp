@@ -20,7 +20,6 @@ class Party(Base):
     party_code: Mapped[str] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(200))
     area: Mapped[str] = mapped_column(String(120), default="")
-    party_type: Mapped[str] = mapped_column(String(20), default="customer")
     gstin: Mapped[str | None] = mapped_column(String(20), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     pan: Mapped[str | None] = mapped_column(String(20), nullable=True)
@@ -64,6 +63,9 @@ class PartyAddress(Base):
     lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     place_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # v2 §1: a pasted Google Maps URL, kept verbatim so the delivery run can
+    # just open it; lat/lng are parsed out of it when they are in the link.
+    map_link: Mapped[str | None] = mapped_column(String(500), nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
 
 

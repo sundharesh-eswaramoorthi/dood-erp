@@ -27,7 +27,7 @@ import {
 
 export function TransfersPage() {
   const qc = useQueryClient();
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
+  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
 
   const [t, setT] = useState({ from: "", to: "", product: "", qty: "" });

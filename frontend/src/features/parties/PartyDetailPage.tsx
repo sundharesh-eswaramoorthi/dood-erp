@@ -35,7 +35,7 @@ export function PartyDetailPage() {
   const party = useQuery({ queryKey: ["party", partyId], queryFn: () => getParty(partyId) });
 
   const [contact, setContact] = useState({ name: "", phone: "", relationship: "" });
-  const [address, setAddress] = useState({ line1: "", city: "", lat: "", lng: "" });
+  const [address, setAddress] = useState({ line1: "", city: "", lat: "", lng: "", map_link: "" });
   const [gstin, setGstin] = useState("");
   const [ledger, setLedger] = useState({ side: "debit", amount: "", note: "" });
   const [tagSel, setTagSel] = useState("");
@@ -84,9 +84,10 @@ export function PartyDetailPage() {
         city: address.city,
         lat: address.lat || null,
         lng: address.lng || null,
+        map_link: address.map_link || null,
       }),
     onSuccess: () => {
-      setAddress({ line1: "", city: "", lat: "", lng: "" });
+      setAddress({ line1: "", city: "", lat: "", lng: "", map_link: "" });
       invalidate();
     },
   });
@@ -113,7 +114,6 @@ export function PartyDetailPage() {
             {p.name}
           </Typography>
           <Chip label={p.party_code} />
-          <Chip label={p.party_type} color="secondary" variant="outlined" />
           <Chip
             label={p.is_active ? "Active" : "Inactive"}
             color={p.is_active ? "success" : "default"}
@@ -219,6 +219,14 @@ export function PartyDetailPage() {
               • {a.line1}
               {a.city ? `, ${a.city}` : ""}
               {a.lat && a.lng ? ` · 📍 ${a.lat}, ${a.lng}` : ""}
+              {a.map_link && (
+                <>
+                  {" · "}
+                  <MuiLink href={a.map_link} target="_blank" rel="noopener noreferrer">
+                    open in Maps
+                  </MuiLink>
+                </>
+              )}
             </Typography>
           ))}
           {p.addresses.length === 0 && (
@@ -259,6 +267,14 @@ export function PartyDetailPage() {
                 value={address.lng}
                 onChange={(e) => setAddress({ ...address, lng: e.target.value })}
                 sx={{ width: 120 }}
+              />
+              <TextField
+                size="small"
+                label="Map link"
+                placeholder="paste a Google Maps link"
+                value={address.map_link}
+                onChange={(e) => setAddress({ ...address, map_link: e.target.value })}
+                sx={{ minWidth: 240 }}
               />
               <Button type="submit" variant="contained" disabled={mAddress.isPending}>
                 Add address

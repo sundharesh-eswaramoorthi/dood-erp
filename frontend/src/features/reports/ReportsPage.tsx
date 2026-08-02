@@ -58,7 +58,7 @@ export function ReportsPage() {
   const products = useQuery({ queryKey: ["products"], queryFn: () => listProducts() });
   const categories = useQuery({ queryKey: ["categories"], queryFn: listCategories });
   const branches = useQuery({ queryKey: ["branches"], queryFn: listBranches });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
+  const godowns = useQuery({ queryKey: ["godowns"], queryFn: () => listGodowns() });
   const payTypes = useQuery({ queryKey: ["payment-types"], queryFn: () => listPaymentTypes() });
 
   const report = useQuery({

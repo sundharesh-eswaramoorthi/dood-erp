@@ -44,6 +44,8 @@ import {
   type GodownAdmin,
   type Tag,
   type TaxRate,
+  listNumbering,
+  updateNumbering,
 } from "./api";
 
 const EMPTY_BRANCH = { name: "", code: "", address: "", phone: "", gstin: "", state_code: "" };
@@ -495,6 +497,125 @@ export function SettingsPage() {
           </Stack>
         </CardContent>
       </Card>
+
+      <NumberingCard />
     </Stack>
+  );
+}
+
+
+/** v2 §9 "customisable document numbers" — every document's prefix, width and
+ *  next number, editable in one place. */
+function NumberingCard() {
+  const qc = useQueryClient();
+  const series = useQuery({ queryKey: ["numbering"], queryFn: listNumbering });
+  const [draft, setDraft] = useState<Record<number, { prefix: string; pad_width: string; next_value: string }>>({});
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const save = useMutation({
+    mutationFn: (args: { id: number; body: { prefix?: string; pad_width?: number; next_value?: number } }) =>
+      updateNumbering(args.id, args.body),
+    onSuccess: (row) => {
+      setMsg({
+        text: `${row.label}: the next number will be ${row.sample}. Documents already issued keep their old numbers.`,
+        ok: true,
+      });
+      setDraft((d) => {
+        const n = { ...d };
+        delete n[row.id];
+        return n;
+      });
+      qc.invalidateQueries({ queryKey: ["numbering"] });
+    },
+    onError: (e) => setMsg({ text: errorMessage(e, "Could not update the series"), ok: false }),
+  });
+
+  const rows = series.data ?? [];
+
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" gutterBottom>Document numbering</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Each document type gets its own prefix and running number, per financial year.
+          Changing a prefix affects only documents issued from now on.
+        </Typography>
+        {msg && (
+          <Alert severity={msg.ok ? "success" : "error"} sx={{ mb: 2 }} onClose={() => setMsg(null)}>
+            {msg.text}
+          </Alert>
+        )}
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell>Document</TableCell>
+              <TableCell>Year</TableCell>
+              <TableCell>Prefix</TableCell>
+              <TableCell>Digits</TableCell>
+              <TableCell>Next number</TableCell>
+              <TableCell>Preview</TableCell>
+              <TableCell align="right" />
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((r) => {
+              const d = draft[r.id] ?? {
+                prefix: r.prefix,
+                pad_width: String(r.pad_width),
+                next_value: String(r.next_value),
+              };
+              const set = (k: keyof typeof d, v: string) =>
+                setDraft((s) => ({ ...s, [r.id]: { ...d, [k]: v } }));
+              const dirty =
+                d.prefix !== r.prefix ||
+                d.pad_width !== String(r.pad_width) ||
+                d.next_value !== String(r.next_value);
+              const preview = `${d.prefix}${d.next_value.padStart(Number(d.pad_width) || 1, "0")}`;
+              return (
+                <TableRow key={r.id}>
+                  <TableCell>{r.label}</TableCell>
+                  <TableCell>{r.fin_year}</TableCell>
+                  <TableCell>
+                    <TextField size="small" value={d.prefix} onChange={(e) => set("prefix", e.target.value)} sx={{ width: 110 }} />
+                  </TableCell>
+                  <TableCell>
+                    <TextField size="small" value={d.pad_width} onChange={(e) => set("pad_width", e.target.value)} sx={{ width: 70 }} />
+                  </TableCell>
+                  <TableCell>
+                    <TextField size="small" value={d.next_value} onChange={(e) => set("next_value", e.target.value)} sx={{ width: 90 }} />
+                  </TableCell>
+                  <TableCell><code>{preview}</code></TableCell>
+                  <TableCell align="right">
+                    <Button
+                      size="small"
+                      disabled={!dirty || save.isPending}
+                      onClick={() =>
+                        save.mutate({
+                          id: r.id,
+                          body: {
+                            prefix: d.prefix,
+                            pad_width: Number(d.pad_width) || r.pad_width,
+                            next_value: Number(d.next_value) || r.next_value,
+                          },
+                        })
+                      }
+                    >
+                      Save
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {rows.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={7}>
+                  <Typography color="text.secondary" variant="body2">No numbering series yet.</Typography>
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   );
 }

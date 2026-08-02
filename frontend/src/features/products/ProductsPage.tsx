@@ -25,7 +25,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
+import { useAuth } from "../../store/auth";
 import { listGodowns } from "../stock/api";
+import { listBranches } from "../users/api";
 import { listUnits } from "../units/api";
 import {
   createCategory,
@@ -56,6 +58,7 @@ const EMPTY = {
   opening_rate: "",
   opening_as_of: "",
   opening_godown_id: "",
+  opening_branch_id: "",
 };
 
 const money = (v: string | null | undefined) =>
@@ -72,7 +75,18 @@ export function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null);
 
   const units = useQuery({ queryKey: ["units"], queryFn: listUnits });
-  const godowns = useQuery({ queryKey: ["godowns"], queryFn: listGodowns });
+  const godowns = useQuery({ queryKey: ["godowns", "all"], queryFn: () => listGodowns(true) });
+  const { user: me } = useAuth();
+  const allBranches = useQuery({ queryKey: ["branches"], queryFn: listBranches });
+  // offering a branch the user cannot post into just earns them a 403
+  const branches = {
+    data: (allBranches.data ?? []).filter((b) => me?.branch_ids.includes(b.id)),
+  };
+  // stock_balance is keyed on (branch, godown), so only offer godowns of the
+  // chosen branch — a mismatched pair is refused by the server anyway.
+  const openingGodowns = (godowns.data ?? []).filter(
+    (g) => String(g.branch_id) === form.opening_branch_id,
+  );
   const categories = useQuery({ queryKey: ["categories"], queryFn: listCategories });
   const products = useQuery({ queryKey: ["products", filters], queryFn: () => listProducts(filters) });
 
@@ -85,7 +99,7 @@ export function ProductsPage() {
   const create = useMutation({
     mutationFn: () =>
       createProduct({
-        code: form.code,
+        code: form.code || undefined,
         name: form.name,
         base_unit_id: Number(form.base_unit_id),
         category_id: form.category_id ? Number(form.category_id) : null,
@@ -102,6 +116,7 @@ export function ProductsPage() {
         opening_rate: form.opening_rate || null,
         opening_as_of: form.opening_as_of || null,
         opening_godown_id: form.opening_godown_id ? Number(form.opening_godown_id) : null,
+        opening_branch_id: form.opening_branch_id ? Number(form.opening_branch_id) : null,
       }),
     onSuccess: () => {
       setForm(EMPTY);
@@ -129,7 +144,7 @@ export function ProductsPage() {
     },
   });
 
-  const canSubmit = form.code && form.name && form.base_unit_id;
+  const canSubmit = form.name && form.base_unit_id;
 
   return (
     <Stack spacing={3}>
@@ -171,9 +186,10 @@ export function ProductsPage() {
               <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
                 <TextField
                   label="Code"
-                  required
+                  placeholder="auto"
                   value={form.code}
                   onChange={(e) => setForm({ ...form, code: e.target.value })}
+                  helperText="blank = numbered automatically"
                   sx={{ width: 160 }}
                 />
                 <TextField
@@ -283,10 +299,18 @@ export function ProductsPage() {
                   value={form.opening_as_of}
                   onChange={(e) => setForm({ ...form, opening_as_of: e.target.value })} sx={{ width: 170 }}
                   disabled={!form.opening_qty} />
-                <TextField label="Location" select value={form.opening_godown_id}
-                  onChange={(e) => setForm({ ...form, opening_godown_id: e.target.value })}
+                <TextField label="Branch" select value={form.opening_branch_id}
+                  onChange={(e) => setForm({ ...form, opening_branch_id: e.target.value, opening_godown_id: "" })}
                   sx={{ width: 170 }} disabled={!form.opening_qty}>
-                  {(godowns.data ?? []).map((g) => (
+                  {(branches.data ?? []).map((b) => (
+                    <MenuItem key={b.id} value={String(b.id)}>{b.name}</MenuItem>
+                  ))}
+                </TextField>
+                <TextField label="Godown" select value={form.opening_godown_id}
+                  onChange={(e) => setForm({ ...form, opening_godown_id: e.target.value })}
+                  sx={{ width: 170 }} disabled={!form.opening_qty || !form.opening_branch_id}
+                  helperText={form.opening_qty && !form.opening_branch_id ? "pick a branch first" : " "}>
+                  {openingGodowns.map((g) => (
                     <MenuItem key={g.id} value={String(g.id)}>{g.name}</MenuItem>
                   ))}
                 </TextField>

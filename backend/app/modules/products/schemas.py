@@ -26,7 +26,9 @@ class ConversionIn(BaseModel):
 
 
 class ProductCreate(BaseModel):
-    code: str = Field(min_length=1, max_length=40)
+    # v2 §2: optional. Left blank it is allocated from the `product` numbering
+    # series, the same gap-free allocator that issues party codes.
+    code: str | None = Field(default=None, max_length=40)
     name: str = Field(min_length=1, max_length=200)
     base_unit_id: int
     category_id: int | None = None
@@ -51,6 +53,7 @@ class ProductCreate(BaseModel):
     opening_rate: Decimal | None = Field(default=None, ge=0)
     opening_as_of: dt.date | None = None
     opening_godown_id: int | None = None
+    opening_branch_id: int | None = None   # stock_balance is keyed on both
     is_active: bool = True
 
 
@@ -98,6 +101,7 @@ class ProductOut(BaseModel):
     opening_rate: Decimal | None
     opening_as_of: dt.date | None
     opening_godown_id: int | None
+    opening_branch_id: int | None
 
 
 class ProductListItem(ProductOut):

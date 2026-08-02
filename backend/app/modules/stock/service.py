@@ -13,6 +13,7 @@ from app.modules.stock.schemas import (
     TransferCreate,
     VerificationCreate,
 )
+from app.services import doc_money
 from app.services import stock_engine as eng
 from app.services.numbering import allocate
 from app.services.outbox import emit
@@ -26,6 +27,9 @@ async def post_adjustment(session: AsyncSession, principal: Principal, data: Adj
         raise ValueError("Caller has no branch access")
     if branch_id not in principal.branch_ids:
         raise PermissionError("Branch not permitted")
+    # stock_balance is keyed on (branch, godown); an unrelated pair would open a
+    # bucket that no other document can ever reach.
+    await doc_money.resolve_godown(session, branch_id, data.godown_id, None)
 
     eff = data.effective_date or dt.date.today()
     number = await allocate(session, principal.org_id, None, "stock_adjustment")

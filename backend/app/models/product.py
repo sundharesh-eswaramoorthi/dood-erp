@@ -54,6 +54,7 @@ class Product(Base):
     opening_rate: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     opening_as_of: Mapped[dt.date | None] = mapped_column(Date, nullable=True)
     opening_godown_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    opening_branch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_by: Mapped[int] = mapped_column(BigInteger)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

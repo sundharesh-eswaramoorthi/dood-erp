@@ -55,7 +55,6 @@ async def create(
 @router.get("", response_model=list[PartyListItem])
 async def list_(
     q: str | None = None,
-    party_type: str | None = None,
     area: str | None = None,
     is_active: bool | None = None,
     serving_branch_id: int | None = None,
@@ -69,7 +68,7 @@ async def list_(
 ):
     return await service.list_parties(
         session, principal, q,
-        party_type=party_type, area=area, is_active=is_active,
+        area=area, is_active=is_active,
         serving_branch_id=serving_branch_id, tag_id=tag_id,
         sort=sort, direction=direction, limit=limit, offset=offset,
     )

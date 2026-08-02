@@ -28,6 +28,7 @@ export interface Product {
   opening_rate: string | null;
   opening_as_of: string | null;
   opening_godown_id: number | null;
+  opening_branch_id: number | null;
   // present on list rows only
   stock_qty?: string;
   stock_value?: string;
@@ -37,7 +38,8 @@ export interface Product {
 }
 
 export interface ProductCreate {
-  code: string;
+  /** optional — blank means "allocate one from the product numbering series" */
+  code?: string;
   name: string;
   base_unit_id: number;
   category_id?: number | null;
@@ -54,6 +56,7 @@ export interface ProductCreate {
   opening_rate?: string | null;
   opening_as_of?: string | null;
   opening_godown_id?: number | null;
+  opening_branch_id?: number | null;
   is_active?: boolean;
 }
 

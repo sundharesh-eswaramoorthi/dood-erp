@@ -14,6 +14,8 @@ from app.modules.settings.schemas import (
     GodownCreate,
     GodownOut,
     GodownUpdate,
+    NumberingSeriesOut,
+    NumberingSeriesUpdate,
     SettingOut,
     SettingUpsert,
     TagCreate,
@@ -212,3 +214,27 @@ async def feature_flags(
     session: AsyncSession = Depends(get_scoped_session),
 ):
     return await service.feature_flags(session, principal)
+
+
+# ---- document numbering (v2 §9 "customisable document numbers") ----
+@router.get("/numbering-series", response_model=list[NumberingSeriesOut])
+async def numbering_list(
+    principal: Principal = Depends(_admin()),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    return await service.list_numbering(session, principal)
+
+
+@router.put("/numbering-series/{series_id}", response_model=NumberingSeriesOut)
+async def numbering_update(
+    series_id: int,
+    payload: NumberingSeriesUpdate,
+    principal: Principal = Depends(_admin()),
+    session: AsyncSession = Depends(get_scoped_session),
+):
+    try:
+        return await service.update_numbering(session, principal, series_id, payload)
+    except LookupError as e:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(e))
+    except ValueError as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
